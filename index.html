@@ -2762,7 +2762,7 @@ function Oa() {
       hint: "",
       solution: ""
     }),
-    [ap, ei] = $.useState("Base SQLite synchronisée (mind_fortress.db + sauvegarde locale)."),
+    [ap, ei] = $.useState("Sauvegarde cloud active."),
     [fp, xn] = $.useState("SQLite Natif (@libsql/client · Turso Ready) connecté · Prêt pour ta première séance."),
     [ml, Xa] = $.useState(""),
     [cp, ni] = $.useState(false);
@@ -3691,7 +3691,7 @@ function Oa() {
       : o.includes("/@/")
       ? "Profil joueur Lichess"
       : "Partie Lichess";
-    Ka(`${S} détecté — prêt à ouvrir ou à sauvegarder dans ta base SQLite.`);
+    Ka(`${S} détecté — prêt à ouvrir ou à enregistrer.`);
   }
 
   async function addLichessUrlToPuzzles() {
@@ -4060,7 +4060,7 @@ function Oa() {
         if (res.ok) applyServerState(await res.json());
       } catch {}
     }
-    Ze("Partie retirée de la base SQLite.");
+    Ze("Partie retirée.");
   }
 
   async function saveOpponentToSqlite() {
