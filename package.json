@@ -18,8 +18,9 @@
     "test:step9": "node tests/step9_pwa.test.js",
     "test:step10": "node tests/step10_tournament_mode.test.js",
     "test:step11": "node tests/step11_visualization.test.js",
+    "test:step12": "node tests/step12_stockfish_blunders.test.js",
     "test:step14": "node tests/step14_lichess_puzzle_stream.test.js",
-    "test": "node tests/step1_db_turso.test.js && node tests/step2_valisoachess.test.js && node tests/step3_fsrs.test.js && node tests/step4_fide_clock.test.js && node tests/step5_lichess_sync.test.js && node tests/step6_scouting_openings.test.js && node tests/step7_analytics_deploy.test.js && node tests/step8_lichess_auth_multiuser.test.js && node tests/step9_pwa.test.js && node tests/step10_tournament_mode.test.js && node tests/step11_visualization.test.js && node tests/step14_lichess_puzzle_stream.test.js"
+    "test": "node tests/step1_db_turso.test.js && node tests/step2_valisoachess.test.js && node tests/step3_fsrs.test.js && node tests/step4_fide_clock.test.js && node tests/step5_lichess_sync.test.js && node tests/step6_scouting_openings.test.js && node tests/step7_analytics_deploy.test.js && node tests/step8_lichess_auth_multiuser.test.js && node tests/step9_pwa.test.js && node tests/step10_tournament_mode.test.js && node tests/step11_visualization.test.js && node tests/step12_stockfish_blunders.test.js && node tests/step14_lichess_puzzle_stream.test.js"
   },
   "dependencies": {
     "@libsql/client": "^0.17.0"

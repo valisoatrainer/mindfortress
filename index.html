@@ -1960,6 +1960,7 @@ input:focus,textarea:focus,select:focus{
 <script src="vendor/ValisoaScoutingOpenings.js"></script>
 <script src="vendor/ValisoaAnalytics.js"></script>
 <script src="vendor/ValisoaVisualization.js"></script>
+<script src="vendor/ValisoaStockfishAnalyzer.js"></script>
 
 </head>
 <body>
@@ -2703,6 +2704,9 @@ function Oa() {
     [visStartTs, setVisStartTs] = $.useState(0),
     [visFeedback, setVisFeedback] = $.useState(""),
     [visBlindIdx, setVisBlindIdx] = $.useState(0),
+    [sfAnalyzingGameId, setSfAnalyzingGameId] = $.useState(""),
+    [sfProgress, setSfProgress] = $.useState({ done: 0, total: 0 }),
+    [sfBlundersByGame, setSfBlundersByGame] = $.useState({}),
     [newRoundForm, setNewRoundForm] = $.useState({
       tournament_name: "Championnat de Madagascar 2027",
       round_number: 1,
@@ -4227,6 +4231,57 @@ function Oa() {
       Ze(`✅ ${parsed.length} partie(s) PGN analysée(s) avec ValisoaLichess !`);
     }
     setLichessSyncBusy(false);
+  }
+
+  async function analyzeLichessGameWithStockfish(gameObj) {
+    if (!gameObj || !gameObj.pgn || !window.ValisoaStockfishAnalyzer) return;
+    setSfAnalyzingGameId(gameObj.id);
+    setSfProgress({ done: 0, total: 0 });
+    try {
+      let blunders = await window.ValisoaStockfishAnalyzer.analyzeGameWithStockfish(gameObj.pgn, {
+        depth: 11,
+        thresholdCp: 150,
+        maxPlies: 60,
+        onProgress: (done, total) => setSfProgress({ done, total })
+      });
+      setSfBlundersByGame((prev) => ({ ...prev, [gameObj.id]: blunders }));
+      Ze(
+        blunders.length > 0
+          ? `🤖 ${blunders.length} gaffe(s) (> 150 cp) détectée(s) dans ${gameObj.white} vs ${gameObj.black} !`
+          : `✅ Aucune gaffe > 150 cp détectée sur les 60 premiers demi-coups !`
+      );
+    } catch (err) {
+      Ze(`⚠️ Erreur Stockfish WASM : ${err.message || "Worker indisponible"}`);
+    } finally {
+      setSfAnalyzingGameId("");
+    }
+  }
+
+  async function saveStockfishBlunderToFsrs(gameObj, blunder) {
+    if (!gameObj || !blunder) return;
+    try {
+      let res = await fetch("/api/lichess/to-puzzle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          game_id: gameObj.id,
+          blunder_ply: blunder.ply,
+          fen: blunder.fen,
+          solution_moves: blunder.solution_moves,
+          moveNumber: blunder.moveNumber,
+          diff: blunder.diff,
+          theme: "middlegame",
+          title: `Gaffe Stockfish (${blunder.evalDropCp} cp) · Coup ${blunder.moveNumber} (${blunder.side})`,
+          hint: `Tu as joué ${blunder.playedSan}. Trouve le meilleur coup Stockfish !`
+        })
+      });
+      if (res.ok) {
+        let st = await res.json();
+        applyServerState(st);
+        Ze(`🎯 Gaffe coup ${blunder.moveNumber} (${blunder.bestMoveSan}) enregistrée en Puzzle FSRS !`);
+      }
+    } catch (_e) {}
   }
 
   async function convertLichessGameToFsrsPuzzle(gameObj) {
@@ -8264,12 +8319,49 @@ function Oa() {
                                           children: "🎯 Convertir en Puzzle FSRS"
                                         }),
                                         f("button", {
+                                          type: "button",
+                                          disabled: sfAnalyzingGameId === gItem.id,
+                                          onClick: () => analyzeLichessGameWithStockfish(gItem),
+                                          className: "px-3 py-1.5 rounded-xl bg-[#5B8CFF]/20 border border-[#5B8CFF]/50 text-[#AFC6FF] text-xs font-bold hover:bg-[#5B8CFF]/30 disabled:opacity-50",
+                                          children:
+                                            sfAnalyzingGameId === gItem.id
+                                              ? `🤖 Stockfish ${sfProgress.done}/${sfProgress.total || "…"}`
+                                              : "🤖 Analyser Gaffes (Stockfish)"
+                                        }),
+                                        f("button", {
                                           onClick: () => deleteLichessGameFromDb(gItem.id),
                                           className: "ml-auto px-2.5 py-1.5 rounded-xl bg-[#181826] text-red-300 text-xs font-bold hover:bg-red-950/40",
                                           children: "✕"
                                         })
                                       ]
-                                    })
+                                    }),
+                                    Array.isArray(sfBlundersByGame[gItem.id]) &&
+                                      d("div", {
+                                        className: "mt-2 space-y-1.5 border-t border-[#26263A] pt-2",
+                                        children:
+                                          sfBlundersByGame[gItem.id].length === 0
+                                            ? f("p", { className: "text-[11px] text-emerald-300", children: "✅ Aucune gaffe > 150 cp détectée." })
+                                            : sfBlundersByGame[gItem.id].slice(0, 4).map((bl) =>
+                                                d(
+                                                  "div",
+                                                  {
+                                                    className: "flex flex-wrap items-center justify-between gap-2 bg-[#12121C] border border-red-500/30 rounded-xl px-2.5 py-1.5 text-[11px]"
+                                                  },
+                                                  [
+                                                    f("span", {
+                                                      className: "text-[#C9CAD9]",
+                                                      children: `Coup ${bl.moveNumber} (${bl.side}) : ${bl.playedSan} → Meilleur : ${bl.bestMoveSan} (-${bl.evalDropCp} cp)`
+                                                    }),
+                                                    f("button", {
+                                                      type: "button",
+                                                      onClick: () => saveStockfishBlunderToFsrs(gItem, bl),
+                                                      className: "px-2.5 py-1 rounded-lg bg-[#FFD700] text-black font-extrabold",
+                                                      children: "+ Puzzle FSRS"
+                                                    })
+                                                  ]
+                                                )
+                                              )
+                                      })
                                   ]
                                 })
                               )

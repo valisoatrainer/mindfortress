@@ -1187,7 +1187,9 @@ async function apiHandler(req, res, customUrl = null) {
                   custom, solved, attempts, box, fsrs_state, fsrs_stability, fsrs_difficulty, user_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 1, 0, 0.0, ?, ?)`,
           args: [
-            `${builtPuzzle.code}-U${userId}`,
+            payload.blunder_ply
+              ? `${builtPuzzle.code}-P${Number(payload.blunder_ply)}-U${userId}`
+              : `${builtPuzzle.code}-U${userId}`,
             builtPuzzle.title,
             builtPuzzle.fen,
             builtPuzzle.theme,
