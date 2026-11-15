@@ -10,6 +10,7 @@ const { getDbClient, resolveLocalDbFilePath } = require("./client");
 const { enrichPuzzleWithFSRS, computeFSRSStats, buildTrainingQueue } = require("./fsrs");
 const { computeChronobiologyReport } = require("./lichess");
 const { computeAdvancedAnalytics } = require("./analytics");
+const { ensureUserDefaults, buildDefaultUserSettings } = require("./auth");
 
 const BASE_DIR = path.join(__dirname, "..");
 const SCHEMA_PATH = path.join(__dirname, "schema.sql");
@@ -48,12 +49,20 @@ async function initDatabase(customUrl) {
     fsrs_lapses: "INTEGER NOT NULL DEFAULT 0",
     fsrs_last_review: "TEXT",
     fsrs_due_date: "TEXT",
-    woodpecker_cycle: "INTEGER NOT NULL DEFAULT 1"
+    woodpecker_cycle: "INTEGER NOT NULL DEFAULT 1",
+    user_id: "INTEGER NOT NULL DEFAULT 0"
   });
 
   await ensureColumns(client, "settings", {
     updated_at: "TEXT"
   });
+
+  await ensureColumns(client, "fsrs_review_logs", { user_id: "INTEGER NOT NULL DEFAULT 1" });
+  await ensureColumns(client, "logs", { user_id: "INTEGER NOT NULL DEFAULT 1" });
+  await ensureColumns(client, "contextual_journal", { user_id: "INTEGER NOT NULL DEFAULT 1" });
+  await ensureColumns(client, "blindage_entries", { user_id: "INTEGER NOT NULL DEFAULT 1" });
+  await ensureColumns(client, "opponents", { user_id: "INTEGER NOT NULL DEFAULT 1" });
+  await ensureColumns(client, "opening_repertoire", { user_id: "INTEGER NOT NULL DEFAULT 1" });
 
   // 2. Exécution du schéma DDL complet (tables + index)
   await client.executeMultiple(schemaSql);
@@ -196,13 +205,18 @@ function createBackup(manual = false, customUrl = null) {
   }
 }
 
-async function recalculateStreak(client) {
-  const daysRes = await client.execute("SELECT day_key FROM completed_days ORDER BY day_key DESC");
+async function recalculateStreak(client, userId = 1) {
+  const uid = Number(userId) || 1;
+  const daysRes = await client.execute({
+    sql: "SELECT day_key FROM user_completed_days WHERE user_id = ? ORDER BY day_key DESC",
+    args: [uid]
+  });
   const daysSet = new Set((daysRes.rows || []).map((r) => r.day_key));
 
-  const logsRes = await client.execute(
-    "SELECT substr(created_at, 1, 10) AS d FROM logs WHERE created_at IS NOT NULL"
-  );
+  const logsRes = await client.execute({
+    sql: "SELECT substr(created_at, 1, 10) AS d FROM logs WHERE user_id = ? AND created_at IS NOT NULL",
+    args: [uid]
+  });
   for (const r of logsRes.rows || []) {
     if (r.d) daysSet.add(r.d);
   }
@@ -221,14 +235,26 @@ async function recalculateStreak(client) {
   }
 
   await client.execute({
-    sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('streak', ?, CURRENT_TIMESTAMP)",
-    args: [String(streak)]
+    sql: `INSERT INTO user_settings (user_id, key, value, updated_at)
+          VALUES (?, 'streak', ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    args: [uid, String(streak)]
   });
   return streak;
 }
 
-async function getFullState(customUrl) {
+async function getFullState(customUrl, userId = 1) {
   const client = getDbClient(customUrl);
+  const uid = Number(userId) || 1;
+
+  const userRes = await client.execute({
+    sql: "SELECT id, lichess_id, username, perfs_json, created_at, last_login_at FROM users WHERE id = ?",
+    args: [uid]
+  });
+  const userRow = (userRes.rows && userRes.rows[0]) || null;
+  if (userRow) {
+    await ensureUserDefaults(client, uid, userRow.username || "");
+  }
 
   const [
     settingsRes,
@@ -242,19 +268,42 @@ async function getFullState(customUrl) {
     opponentsRes,
     openingRepRes
   ] = await Promise.all([
-    client.execute("SELECT key, value FROM settings"),
-    client.execute("SELECT * FROM puzzles ORDER BY id ASC"),
-    client.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 200"),
-    client.execute("SELECT * FROM contextual_journal ORDER BY id DESC LIMIT 200"),
-    client.execute("SELECT day_key FROM completed_days ORDER BY day_key DESC"),
-    client.execute("SELECT * FROM blindage_entries ORDER BY id DESC LIMIT 50"),
-    client.execute("SELECT * FROM fsrs_review_logs ORDER BY id DESC LIMIT 100"),
-    client.execute("SELECT * FROM lichess_games ORDER BY played_at DESC, created_at DESC LIMIT 100"),
-    client.execute("SELECT * FROM opponents ORDER BY id DESC"),
-    client.execute("SELECT * FROM opening_repertoire ORDER BY id ASC")
+    client.execute({ sql: "SELECT key, value FROM user_settings WHERE user_id = ?", args: [uid] }),
+    client.execute({
+      sql: `SELECT
+              p.id, p.code, p.title, p.fen, p.theme, p.type, p.diff, p.side,
+              p.solution, p.solution_moves, p.hint, p.custom, p.user_id, p.created_at,
+              COALESCE(upp.solved, CASE WHEN p.user_id = ? THEN p.solved ELSE 0 END) AS solved,
+              COALESCE(upp.attempts, CASE WHEN p.user_id = ? THEN p.attempts ELSE 0 END) AS attempts,
+              COALESCE(upp.best_time_sec, CASE WHEN p.user_id = ? THEN p.best_time_sec ELSE 0 END) AS best_time_sec,
+              COALESCE(upp.box, CASE WHEN p.user_id = ? THEN p.box ELSE 1 END) AS box,
+              COALESCE(upp.fsrs_state, CASE WHEN p.user_id = ? THEN p.fsrs_state ELSE 0 END) AS fsrs_state,
+              COALESCE(upp.fsrs_stability, CASE WHEN p.user_id = ? THEN p.fsrs_stability ELSE 0.0 END) AS fsrs_stability,
+              COALESCE(upp.fsrs_difficulty, CASE WHEN p.user_id = ? THEN p.fsrs_difficulty ELSE MIN(10.0, MAX(1.0, p.diff * 1.8)) END) AS fsrs_difficulty,
+              COALESCE(upp.fsrs_elapsed_days, CASE WHEN p.user_id = ? THEN p.fsrs_elapsed_days ELSE 0 END) AS fsrs_elapsed_days,
+              COALESCE(upp.fsrs_scheduled_days, CASE WHEN p.user_id = ? THEN p.fsrs_scheduled_days ELSE 0 END) AS fsrs_scheduled_days,
+              COALESCE(upp.fsrs_reps, CASE WHEN p.user_id = ? THEN p.fsrs_reps ELSE 0 END) AS fsrs_reps,
+              COALESCE(upp.fsrs_lapses, CASE WHEN p.user_id = ? THEN p.fsrs_lapses ELSE 0 END) AS fsrs_lapses,
+              COALESCE(upp.fsrs_last_review, CASE WHEN p.user_id = ? THEN p.fsrs_last_review ELSE NULL END) AS fsrs_last_review,
+              COALESCE(upp.fsrs_due_date, CASE WHEN p.user_id = ? THEN p.fsrs_due_date ELSE NULL END) AS fsrs_due_date,
+              COALESCE(upp.woodpecker_cycle, CASE WHEN p.user_id = ? THEN p.woodpecker_cycle ELSE 1 END) AS woodpecker_cycle
+            FROM puzzles p
+            LEFT JOIN user_puzzle_progress upp ON upp.puzzle_id = p.id AND upp.user_id = ?
+            WHERE p.custom = 0 OR p.user_id = ?
+            ORDER BY p.id ASC`,
+      args: [uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid, uid]
+    }),
+    client.execute({ sql: "SELECT * FROM logs WHERE user_id = ? ORDER BY id DESC LIMIT 200", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM contextual_journal WHERE user_id = ? ORDER BY id DESC LIMIT 200", args: [uid] }),
+    client.execute({ sql: "SELECT day_key FROM user_completed_days WHERE user_id = ? ORDER BY day_key DESC", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM blindage_entries WHERE user_id = ? ORDER BY id DESC LIMIT 50", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM fsrs_review_logs WHERE user_id = ? ORDER BY id DESC LIMIT 100", args: [uid] }),
+    client.execute({ sql: "SELECT game_id AS id, white, black, result, speed, played_at, pgn, hour_of_day, opening, critical_fen, critical_move_san, critical_solution_moves, critical_side, critical_move_number, created_at FROM user_lichess_games WHERE user_id = ? ORDER BY played_at DESC, created_at DESC LIMIT 100", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM opponents WHERE user_id = ? ORDER BY id DESC", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM opening_repertoire WHERE user_id = ? ORDER BY id ASC", args: [uid] })
   ]);
 
-  const settings = {};
+  const settings = userRow ? {} : buildDefaultUserSettings("");
   for (const r of settingsRes.rows || []) {
     settings[r.key] = r.value;
   }
@@ -346,11 +395,24 @@ async function getFullState(customUrl) {
     fsrsReviewLogs: fsrsLogsRes.rows || []
   });
 
+  let userPerfs = {};
+  try {
+    if (userRow && userRow.perfs_json) userPerfs = JSON.parse(userRow.perfs_json);
+  } catch (_e) {}
+
   return {
     mode: "sqlite_native",
     driver: client.driver,
     dbPath: localDbPath || client.url,
     tursoReady: true,
+    user: userRow
+      ? {
+          id: Number(userRow.id),
+          lichess_id: userRow.lichess_id,
+          username: userRow.username,
+          perfs: userPerfs
+        }
+      : null,
     settings,
     puzzles,
     fsrsStats,

@@ -19,7 +19,10 @@ const {
   computeChronobiologyReport
 } = require("../db/lichess");
 const ValisoaChessLite = require("../vendor/ValisoaChessLite");
+const { upsertLichessUser, createSessionToken, SESSION_COOKIE_NAME } = require("../db/auth");
 const apiHandler = require("../api/index");
+
+let testCookieHeader = "";
 
 function cleanupTestDb() {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -41,12 +44,15 @@ function httpRequest(port, method, reqPath, bodyObj = null) {
         port,
         path: reqPath,
         method,
-        headers: payload
-          ? {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(payload)
-            }
-          : {}
+        headers: {
+          ...(testCookieHeader ? { Cookie: testCookieHeader } : {}),
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {})
+        }
       },
       (res) => {
         let data = "";
@@ -168,7 +174,9 @@ async function runTests() {
 
     // 2. Test API HTTP : Synchronisation & Déduplication SQLite (INSERT OR IGNORE)
     console.log("👉 Test 2 : POST /api/lichess/sync & Déduplication SQLite (INSERT OR IGNORE)...");
-    await initDatabase(TEST_DB_URL);
+    const dbClient = await initDatabase(TEST_DB_URL);
+    const testUser = await upsertLichessUser(dbClient, { id: "step5_tester", username: "Step5Tester" });
+    testCookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionToken(testUser))}`;
 
     const server = http.createServer((req, res) => {
       if (req.url === "/vendor/ValisoaLichess.js") {

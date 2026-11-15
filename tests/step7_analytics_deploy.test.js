@@ -17,7 +17,10 @@ const TARGET_URL = `file:${TEST_TARGET_DB}`;
 const { getDbClient, createNativeSqliteClient } = require("../db/client");
 const { initDatabase } = require("../db/init");
 const { syncDatabaseToTarget } = require("../db/push_to_turso");
+const { upsertLichessUser, createSessionToken, SESSION_COOKIE_NAME } = require("../db/auth");
 const apiHandler = require("../api/index");
+
+let testCookieHeader = "";
 
 function cleanupTestDbs() {
   for (const base of [TEST_SOURCE_DB, TEST_TARGET_DB]) {
@@ -41,15 +44,16 @@ function httpRequest(port, method, reqPath, bodyObj = null) {
         port,
         path: reqPath,
         method,
-        headers: payload
-          ? {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(payload),
-              Connection: "close"
-            }
-          : {
-              Connection: "close"
-            }
+        headers: {
+          Connection: "close",
+          ...(testCookieHeader ? { Cookie: testCookieHeader } : {}),
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {})
+        }
       },
       (res) => {
         let data = "";
@@ -77,7 +81,9 @@ async function runTests() {
   cleanupTestDbs();
 
   try {
-    await initDatabase(SOURCE_URL);
+    const srcClient = await initDatabase(SOURCE_URL);
+    const testUser = await upsertLichessUser(srcClient, { id: "step7_tester", username: "Step7Tester" });
+    testCookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionToken(testUser))}`;
 
     const server = http.createServer((req, res) => {
       if (req.url === "/vendor/ValisoaAnalytics.js") {

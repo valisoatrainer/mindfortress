@@ -26,6 +26,24 @@ const {
   reviewOpeningLineFSRS
 } = require("../db/scouting");
 const { querySqlAnalytics } = require("../db/analytics");
+const {
+  SESSION_COOKIE_NAME,
+  PKCE_COOKIE_NAME,
+  LICHESS_CLIENT_ID,
+  SESSION_MAX_AGE_SEC,
+  PKCE_MAX_AGE_SEC,
+  signToken,
+  verifyToken,
+  parseCookies,
+  isHttpsRequest,
+  buildCookieString,
+  appendSetCookie,
+  generatePkcePair,
+  createSessionToken,
+  getSessionFromRequest,
+  resolveRequestOrigin,
+  upsertLichessUser
+} = require("../db/auth");
 
 let initializedForUrl = null;
 
@@ -82,6 +100,23 @@ function formatNowLabel() {
   return `${dd}/${mm} · ${hh}:${min}`;
 }
 
+async function setUserSetting(client, userId, key, value) {
+  await client.execute({
+    sql: `INSERT INTO user_settings (user_id, key, value, updated_at)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    args: [Number(userId), key, String(value)]
+  });
+}
+
+async function getUserSetting(client, userId, key, fallback = null) {
+  const res = await client.execute({
+    sql: "SELECT value FROM user_settings WHERE user_id = ? AND key = ?",
+    args: [Number(userId), key]
+  });
+  return res.rows && res.rows[0] ? res.rows[0].value : fallback;
+}
+
 async function apiHandler(req, res, customUrl = null) {
   if (req.method === "OPTIONS") {
     return sendJson(res, { ok: true }, 200);
@@ -93,19 +128,218 @@ async function apiHandler(req, res, customUrl = null) {
 
   try {
     const client = await ensureDbReady(customUrl);
+    const secureCookie = isHttpsRequest(req);
+
+    // ========================================================================
+    // ROUTES PUBLIQUES D'AUTHENTIFICATION LICHESS (OAuth 2.0 PKCE)
+    // ========================================================================
+    if (req.method === "GET" && pathname === "/api/health") {
+      return sendJson(res, { ok: true, auth: "lichess_oauth2_pkce_required" }, 200);
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/lichess/login") {
+      const { codeVerifier, codeChallenge, state } = generatePkcePair();
+      const pkceToken = signToken({
+        state,
+        codeVerifier,
+        exp: Date.now() + PKCE_MAX_AGE_SEC * 1000
+      });
+      appendSetCookie(
+        res,
+        buildCookieString(PKCE_COOKIE_NAME, pkceToken, {
+          maxAge: PKCE_MAX_AGE_SEC,
+          secure: secureCookie
+        })
+      );
+
+      const origin = resolveRequestOrigin(req);
+      const redirectUri = `${origin}/api/auth/lichess/callback`;
+      const lichessAuthUrl =
+        `https://lichess.org/oauth?response_type=code` +
+        `&client_id=${encodeURIComponent(LICHESS_CLIENT_ID)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${encodeURIComponent("preference:read")}` +
+        `&code_challenge_method=S256` +
+        `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+        `&state=${encodeURIComponent(state)}`;
+
+      res.statusCode = 302;
+      res.setHeader("Location", lichessAuthUrl);
+      return res.end();
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/lichess/callback") {
+      const errParam = parsedUrl.searchParams.get("error");
+      if (errParam) {
+        res.statusCode = 302;
+        res.setHeader("Location", `/?auth_error=${encodeURIComponent(errParam)}`);
+        return res.end();
+      }
+
+      const code = parsedUrl.searchParams.get("code");
+      const state = parsedUrl.searchParams.get("state");
+      const cookies = parseCookies(req);
+      const pkcePayload = verifyToken(cookies[PKCE_COOKIE_NAME]);
+
+      if (!code || !state || !pkcePayload || pkcePayload.state !== state || !pkcePayload.codeVerifier) {
+        res.statusCode = 302;
+        res.setHeader("Location", "/?auth_error=invalid_pkce_state");
+        return res.end();
+      }
+
+      const origin = resolveRequestOrigin(req);
+      const redirectUri = `${origin}/api/auth/lichess/callback`;
+
+      const tokenRes = await fetch("https://lichess.org/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          code_verifier: pkcePayload.codeVerifier,
+          redirect_uri: redirectUri,
+          client_id: LICHESS_CLIENT_ID
+        }).toString()
+      });
+
+      if (!tokenRes.ok) {
+        res.statusCode = 302;
+        res.setHeader("Location", "/?auth_error=lichess_token_failed");
+        return res.end();
+      }
+
+      const tokenJson = await tokenRes.json();
+      if (!tokenJson || !tokenJson.access_token) {
+        res.statusCode = 302;
+        res.setHeader("Location", "/?auth_error=lichess_missing_token");
+        return res.end();
+      }
+
+      const accountRes = await fetch("https://lichess.org/api/account", {
+        headers: { Authorization: `Bearer ${tokenJson.access_token}` }
+      });
+      if (!accountRes.ok) {
+        res.statusCode = 302;
+        res.setHeader("Location", "/?auth_error=lichess_account_failed");
+        return res.end();
+      }
+
+      const accountData = await accountRes.json();
+      const user = await upsertLichessUser(client, accountData);
+      const sessionToken = createSessionToken(user);
+
+      appendSetCookie(
+        res,
+        buildCookieString(PKCE_COOKIE_NAME, "", { maxAge: 0, secure: secureCookie })
+      );
+      appendSetCookie(
+        res,
+        buildCookieString(SESSION_COOKIE_NAME, sessionToken, {
+          maxAge: SESSION_MAX_AGE_SEC,
+          secure: secureCookie
+        })
+      );
+
+      res.statusCode = 302;
+      res.setHeader("Location", "/");
+      return res.end();
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/logout") {
+      appendSetCookie(
+        res,
+        buildCookieString(SESSION_COOKIE_NAME, "", { maxAge: 0, secure: secureCookie })
+      );
+      return sendJson(res, { ok: true, authenticated: false }, 200);
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/me") {
+      const session = getSessionFromRequest(req);
+      if (!session) {
+        return sendJson(
+          res,
+          { ok: false, authenticated: false, code: "AUTH_REQUIRED", error: "Connexion Lichess obligatoire." },
+          401
+        );
+      }
+      const userRes = await client.execute({
+        sql: "SELECT id, lichess_id, username, perfs_json FROM users WHERE id = ?",
+        args: [session.userId]
+      });
+      const userRow = userRes.rows && userRes.rows[0];
+      if (!userRow) {
+        return sendJson(
+          res,
+          { ok: false, authenticated: false, code: "AUTH_REQUIRED", error: "Session invalide ou expirée." },
+          401
+        );
+      }
+      let perfs = {};
+      try {
+        if (userRow.perfs_json) perfs = JSON.parse(userRow.perfs_json);
+      } catch (_e) {}
+      return sendJson(
+        res,
+        {
+          ok: true,
+          authenticated: true,
+          user: {
+            id: Number(userRow.id),
+            lichess_id: userRow.lichess_id,
+            username: userRow.username,
+            perfs
+          }
+        },
+        200
+      );
+    }
+
+    // ========================================================================
+    // GARDE D'AUTHENTIFICATION OBLIGATOIRE POUR TOUTES LES AUTRES ROUTES /api/*
+    // ========================================================================
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return sendJson(
+        res,
+        {
+          ok: false,
+          authenticated: false,
+          code: "AUTH_REQUIRED",
+          error: "Connexion Lichess obligatoire pour accéder à votre préparation."
+        },
+        401
+      );
+    }
+    const userCheck = await client.execute({
+      sql: "SELECT id, lichess_id, username FROM users WHERE id = ?",
+      args: [session.userId]
+    });
+    if (!userCheck.rows || userCheck.rows.length === 0) {
+      return sendJson(
+        res,
+        {
+          ok: false,
+          authenticated: false,
+          code: "AUTH_REQUIRED",
+          error: "Compte utilisateur introuvable, veuillez vous reconnecter avec Lichess."
+        },
+        401
+      );
+    }
+    const userId = Number(session.userId);
 
     // ========================================================================
     // GET ROUTES
     // ========================================================================
     if (req.method === "GET") {
       if (pathname === "/api/state" || pathname === "/api") {
-        const state = await getFullState(customUrl);
+        const state = await getFullState(customUrl, userId);
         return sendJson(res, state, 200);
       }
 
       if (pathname === "/api/analytics") {
-        const state = await getFullState(customUrl);
-        const sqlAggregations = await querySqlAnalytics(client);
+        const state = await getFullState(customUrl, userId);
+        const sqlAggregations = await querySqlAnalytics(client, userId);
         return sendJson(
           res,
           {
@@ -119,7 +353,7 @@ async function apiHandler(req, res, customUrl = null) {
       }
 
       if (pathname === "/api/puzzles/due") {
-        const state = await getFullState(customUrl);
+        const state = await getFullState(customUrl, userId);
         const modeParam = parsedUrl.searchParams.get("mode") || state.settings.training_mode || "fsrs";
         const limitParam = Number(parsedUrl.searchParams.get("limit") || 67);
         const queue = buildTrainingQueue(state.puzzles, modeParam, new Date()).slice(0, limitParam);
@@ -166,12 +400,9 @@ async function apiHandler(req, res, customUrl = null) {
       if (pathname === "/api/settings") {
         for (const [k, v] of Object.entries(payload)) {
           const valStr = typeof v === "string" ? v : JSON.stringify(v);
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            args: [k, valStr]
-          });
+          await setUserSetting(client, userId, k, valStr);
         }
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/puzzles") {
@@ -181,8 +412,8 @@ async function apiHandler(req, res, customUrl = null) {
         await client.execute({
           sql: `INSERT INTO puzzles (
                   code, title, fen, theme, type, diff, side, solution, solution_moves, hint,
-                  custom, solved, attempts, box, fsrs_difficulty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 1, ?)`,
+                  custom, solved, attempts, box, fsrs_difficulty, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 1, ?, ?)`,
           args: [
             code,
             payload.title || "Puzzle perso",
@@ -194,10 +425,11 @@ async function apiHandler(req, res, customUrl = null) {
             payload.solution || "Solution à compléter après résolution.",
             JSON.stringify(payload.solution_moves || []),
             payload.hint || "",
-            fsrsDifficulty
+            fsrsDifficulty,
+            userId
           ]
         });
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/puzzles/solve") {
@@ -206,20 +438,35 @@ async function apiHandler(req, res, customUrl = null) {
         const timeSec = Number(payload.time_sec || 0);
         const hadMistake = Boolean(payload.had_mistake);
         const hintUsed = Boolean(payload.hint_used);
-        const emotion = payload.emotion || "Focus";
 
         const rowRes = await client.execute({
-          sql: "SELECT * FROM puzzles WHERE id = ?",
-          args: [pid]
+          sql: `SELECT
+                  p.id, p.diff, p.user_id,
+                  COALESCE(upp.solved, 0) AS solved,
+                  COALESCE(upp.attempts, 0) AS attempts,
+                  COALESCE(upp.best_time_sec, 0) AS best_time_sec,
+                  COALESCE(upp.box, 1) AS box,
+                  COALESCE(upp.fsrs_state, 0) AS fsrs_state,
+                  COALESCE(upp.fsrs_stability, 0.0) AS fsrs_stability,
+                  COALESCE(upp.fsrs_difficulty, MIN(10.0, MAX(1.0, p.diff * 1.8))) AS fsrs_difficulty,
+                  COALESCE(upp.fsrs_elapsed_days, 0) AS fsrs_elapsed_days,
+                  COALESCE(upp.fsrs_scheduled_days, 0) AS fsrs_scheduled_days,
+                  COALESCE(upp.fsrs_reps, 0) AS fsrs_reps,
+                  COALESCE(upp.fsrs_lapses, 0) AS fsrs_lapses,
+                  upp.fsrs_last_review AS fsrs_last_review,
+                  upp.fsrs_due_date AS fsrs_due_date,
+                  COALESCE(upp.woodpecker_cycle, 1) AS woodpecker_cycle
+                FROM puzzles p
+                LEFT JOIN user_puzzle_progress upp ON upp.puzzle_id = p.id AND upp.user_id = ?
+                WHERE p.id = ? AND (p.custom = 0 OR p.user_id = ?)`,
+          args: [userId, pid, userId]
         });
         const row = rowRes.rows && rowRes.rows[0];
         let fsrsUpdate = null;
 
         if (row) {
-          const retRes = await client.execute(
-            "SELECT value FROM settings WHERE key = 'fsrs_request_retention'"
-          );
-          const requestRetention = Number(retRes.rows[0]?.value || 0.9);
+          const retVal = await getUserSetting(client, userId, "fsrs_request_retention", "0.9");
+          const requestRetention = Number(retVal || 0.9);
 
           const rating = payload.rating
             ? Number(payload.rating)
@@ -241,26 +488,32 @@ async function apiHandler(req, res, customUrl = null) {
           }
 
           await client.execute({
-            sql: `UPDATE puzzles
-                  SET solved = ?,
-                      attempts = ?,
-                      box = ?,
-                      best_time_sec = ?,
-                      fsrs_state = ?,
-                      fsrs_stability = ?,
-                      fsrs_difficulty = ?,
-                      fsrs_elapsed_days = ?,
-                      fsrs_scheduled_days = ?,
-                      fsrs_reps = ?,
-                      fsrs_lapses = ?,
-                      fsrs_last_review = ?,
-                      fsrs_due_date = ?
-                  WHERE id = ?`,
+            sql: `INSERT INTO user_puzzle_progress (
+                    user_id, puzzle_id, solved, attempts, best_time_sec, box,
+                    fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_elapsed_days,
+                    fsrs_scheduled_days, fsrs_reps, fsrs_lapses, fsrs_last_review, fsrs_due_date, woodpecker_cycle
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(user_id, puzzle_id) DO UPDATE SET
+                    solved = excluded.solved,
+                    attempts = excluded.attempts,
+                    best_time_sec = excluded.best_time_sec,
+                    box = excluded.box,
+                    fsrs_state = excluded.fsrs_state,
+                    fsrs_stability = excluded.fsrs_stability,
+                    fsrs_difficulty = excluded.fsrs_difficulty,
+                    fsrs_elapsed_days = excluded.fsrs_elapsed_days,
+                    fsrs_scheduled_days = excluded.fsrs_scheduled_days,
+                    fsrs_reps = excluded.fsrs_reps,
+                    fsrs_lapses = excluded.fsrs_lapses,
+                    fsrs_last_review = excluded.fsrs_last_review,
+                    fsrs_due_date = excluded.fsrs_due_date`,
             args: [
+              userId,
+              pid,
               newSolved,
               newAttempts,
-              fsrsUpdate.box,
               bestTime,
+              fsrsUpdate.box,
               fsrsUpdate.fsrs_state,
               fsrsUpdate.fsrs_stability,
               fsrsUpdate.fsrs_difficulty,
@@ -270,17 +523,18 @@ async function apiHandler(req, res, customUrl = null) {
               fsrsUpdate.fsrs_lapses,
               fsrsUpdate.fsrs_last_review,
               fsrsUpdate.fsrs_due_date,
-              pid
+              Number(row.woodpecker_cycle || 1)
             ]
           });
 
           // Enregistrement dans le journal mathématique FSRS (fsrs_review_logs)
           await client.execute({
             sql: `INSERT INTO fsrs_review_logs (
-                    puzzle_id, rating, state, elapsed_days, scheduled_days,
+                    user_id, puzzle_id, rating, state, elapsed_days, scheduled_days,
                     solve_time_sec, stability, difficulty, reviewed_at
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
+              userId,
               pid,
               fsrsUpdate.rating,
               fsrsUpdate.fsrs_state,
@@ -294,37 +548,32 @@ async function apiHandler(req, res, customUrl = null) {
           });
         }
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.lastFsrsReview = fsrsUpdate;
         return sendJson(res, updatedState, 200);
       }
 
       if (pathname === "/api/woodpecker/cycle") {
         const nextCycle = Math.min(5, Math.max(1, Number(payload.cycle || 1)));
+        await setUserSetting(client, userId, "woodpecker_cycle", String(nextCycle));
         await client.execute({
-          sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('woodpecker_cycle', ?, CURRENT_TIMESTAMP)",
-          args: [String(nextCycle)]
+          sql: `INSERT INTO user_puzzle_progress (user_id, puzzle_id, woodpecker_cycle, solved)
+                SELECT ?, id, ?, 0 FROM puzzles WHERE custom = 0 OR user_id = ?
+                ON CONFLICT(user_id, puzzle_id) DO UPDATE SET
+                  woodpecker_cycle = excluded.woodpecker_cycle${payload.reset_cycle_solved ? ", solved = 0" : ""}`,
+          args: [userId, nextCycle, userId]
         });
-        await client.execute({
-          sql: "UPDATE puzzles SET woodpecker_cycle = ?",
-          args: [nextCycle]
-        });
-        if (payload.reset_cycle_solved) {
-          await client.execute("UPDATE puzzles SET solved = 0");
-        }
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/endurance") {
         const nowIso = new Date().toISOString();
         const atLabel = formatNowLabel();
-        const existingRes = await client.execute(
-          "SELECT value FROM settings WHERE key = 'endurance_sessions_json'"
-        );
+        const existingJson = await getUserSetting(client, userId, "endurance_sessions_json", "[]");
         let sessions = [];
         try {
-          if (existingRes.rows[0]?.value) {
-            sessions = JSON.parse(existingRes.rows[0].value);
+          if (existingJson) {
+            sessions = JSON.parse(existingJson);
           }
         } catch (_e) {}
 
@@ -348,20 +597,11 @@ async function apiHandler(req, res, customUrl = null) {
         sessions.unshift(newSession);
         sessions = sessions.slice(0, 100);
 
-        await client.execute({
-          sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('endurance_sessions_json', ?, CURRENT_TIMESTAMP)",
-          args: [JSON.stringify(sessions)]
-        });
-        await client.execute({
-          sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('endurance_notes', ?, CURRENT_TIMESTAMP)",
-          args: [String(payload.notes || "")]
-        });
-        await client.execute({
-          sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('distraction_returns', ?, CURRENT_TIMESTAMP)",
-          args: [String(newSession.distraction_returns)]
-        });
+        await setUserSetting(client, userId, "endurance_sessions_json", JSON.stringify(sessions));
+        await setUserSetting(client, userId, "endurance_notes", String(payload.notes || ""));
+        await setUserSetting(client, userId, "distraction_returns", String(newSession.distraction_returns));
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.lastEnduranceSession = newSession;
         return sendJson(res, updatedState, 200);
       }
@@ -376,10 +616,11 @@ async function apiHandler(req, res, customUrl = null) {
 
         await client.execute({
           sql: `INSERT INTO logs (
-                  at_label, created_at, type, puzzle_id, text, theme, diff,
+                  user_id, at_label, created_at, type, puzzle_id, text, theme, diff,
                   time_sec, success, xp, emotion, intensity, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
+            userId,
             atLabel,
             createdAt,
             payload.type || "Force",
@@ -397,64 +638,47 @@ async function apiHandler(req, res, customUrl = null) {
         });
 
         // Mise à jour XP
-        const xpRes = await client.execute("SELECT value FROM settings WHERE key = 'xp'");
-        const curXp = Number(xpRes.rows[0]?.value || 0);
-        await client.execute({
-          sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('xp', ?, CURRENT_TIMESTAMP)",
-          args: [String(curXp + xpGain)]
-        });
+        const curXp = Number(await getUserSetting(client, userId, "xp", "0"));
+        await setUserSetting(client, userId, "xp", String(curXp + xpGain));
 
         // Mise à jour minutes totales
         if (addMin > 0) {
-          const minRes = await client.execute("SELECT value FROM settings WHERE key = 'total_min'");
-          const curMin = Number(minRes.rows[0]?.value || 0);
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('total_min', ?, CURRENT_TIMESTAMP)",
-            args: [String(curMin + addMin)]
-          });
+          const curMin = Number(await getUserSetting(client, userId, "total_min", "0"));
+          await setUserSetting(client, userId, "total_min", String(curMin + addMin));
         }
 
         // Mise à jour compteur d'essais / réussites
         if (payload.increment_attempts) {
-          const attRes = await client.execute("SELECT value FROM settings WHERE key = 'attempts'");
-          const curAtt = Number(attRes.rows[0]?.value || 0);
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('attempts', ?, CURRENT_TIMESTAMP)",
-            args: [String(curAtt + 1)]
-          });
+          const curAtt = Number(await getUserSetting(client, userId, "attempts", "0"));
+          await setUserSetting(client, userId, "attempts", String(curAtt + 1));
           if (payload.success !== false) {
-            const solRes = await client.execute(
-              "SELECT value FROM settings WHERE key = 'solved_count'"
-            );
-            const curSol = Number(solRes.rows[0]?.value || 0);
-            await client.execute({
-              sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('solved_count', ?, CURRENT_TIMESTAMP)",
-              args: [String(curSol + 1)]
-            });
+            const curSol = Number(await getUserSetting(client, userId, "solved_count", "0"));
+            await setUserSetting(client, userId, "solved_count", String(curSol + 1));
           }
         }
 
         if (markToday) {
           const todayKey = new Date().toISOString().slice(0, 10);
           await client.execute({
-            sql: "INSERT OR IGNORE INTO completed_days (day_key, status, sessions_count) VALUES (?, 'done', 1)",
-            args: [todayKey]
+            sql: "INSERT OR IGNORE INTO user_completed_days (user_id, day_key, status, sessions_count) VALUES (?, ?, 'done', 1)",
+            args: [userId, todayKey]
           });
         }
 
-        await recalculateStreak(client);
-        return sendJson(res, await getFullState(customUrl), 200);
+        await recalculateStreak(client, userId);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/journal") {
         const nowIso = new Date().toISOString();
         await client.execute({
           sql: `INSERT INTO contextual_journal (
-                  log_id, linked_text, created_at, at_label, note,
+                  user_id, log_id, linked_text, created_at, at_label, note,
                   before_emotion, after_emotion, before_intensity, after_intensity,
                   lieu, bruit, sommeil, fatigue, pression, tag
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
+            userId,
             payload.logId || null,
             payload.linkedText || "Séance libre — hors log",
             payload.createdAt || nowIso,
@@ -472,39 +696,40 @@ async function apiHandler(req, res, customUrl = null) {
             payload.tag || ""
           ]
         });
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/days/toggle") {
         const dayKey = payload.day_key;
         if (dayKey) {
           const checkRes = await client.execute({
-            sql: "SELECT day_key FROM completed_days WHERE day_key = ?",
-            args: [dayKey]
+            sql: "SELECT day_key FROM user_completed_days WHERE user_id = ? AND day_key = ?",
+            args: [userId, dayKey]
           });
           if (checkRes.rows && checkRes.rows.length > 0) {
             await client.execute({
-              sql: "DELETE FROM completed_days WHERE day_key = ?",
-              args: [dayKey]
+              sql: "DELETE FROM user_completed_days WHERE user_id = ? AND day_key = ?",
+              args: [userId, dayKey]
             });
           } else {
             await client.execute({
-              sql: "INSERT INTO completed_days (day_key, status, sessions_count) VALUES (?, 'done', 1)",
-              args: [dayKey]
+              sql: "INSERT INTO user_completed_days (user_id, day_key, status, sessions_count) VALUES (?, ?, 'done', 1)",
+              args: [userId, dayKey]
             });
           }
-          await recalculateStreak(client);
+          await recalculateStreak(client, userId);
         }
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/blindage") {
         await client.execute({
           sql: `INSERT INTO blindage_entries (
-                  created_at, wish, outcome, obstacle, plan,
+                  user_id, created_at, wish, outcome, obstacle, plan,
                   col1, col2, col3, mode, breathing_cycles
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
+            userId,
             new Date().toISOString(),
             payload.wish || "",
             payload.outcome || "",
@@ -517,66 +742,40 @@ async function apiHandler(req, res, customUrl = null) {
             Number(payload.breathing_cycles || 0)
           ]
         });
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/backup") {
         const fname = createBackup(true, customUrl);
-        const state = await getFullState(customUrl);
+        const state = await getFullState(customUrl, userId);
         state.backupCreated = fname;
         return sendJson(res, state, 200);
       }
 
       if (pathname === "/api/import-json") {
-        if ("level" in payload) {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('level', ?)",
-            args: [String(payload.level)]
-          });
-        }
-        if ("xp" in payload) {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('xp', ?)",
-            args: [String(payload.xp)]
-          });
-        }
-        if ("totalMin" in payload) {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('total_min', ?)",
-            args: [String(payload.totalMin)]
-          });
-        }
-        if ("lichessUsername" in payload) {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('lichess_username', ?)",
-            args: [String(payload.lichessUsername)]
-          });
-        }
+        if ("level" in payload) await setUserSetting(client, userId, "level", String(payload.level));
+        if ("xp" in payload) await setUserSetting(client, userId, "xp", String(payload.xp));
+        if ("totalMin" in payload) await setUserSetting(client, userId, "total_min", String(payload.totalMin));
+        if ("lichessUsername" in payload) await setUserSetting(client, userId, "lichess_username", String(payload.lichessUsername));
         if (payload.woop && typeof payload.woop === "object") {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('woop_json', ?)",
-            args: [JSON.stringify(payload.woop)]
-          });
+          await setUserSetting(client, userId, "woop_json", JSON.stringify(payload.woop));
         }
         if (payload.journal && typeof payload.journal === "object") {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('journal_3col_json', ?)",
-            args: [JSON.stringify(payload.journal)]
-          });
+          await setUserSetting(client, userId, "journal_3col_json", JSON.stringify(payload.journal));
         }
         if (Array.isArray(payload.completedDays)) {
           for (const dk of payload.completedDays) {
             await client.execute({
-              sql: "INSERT OR IGNORE INTO completed_days (day_key) VALUES (?)",
-              args: [String(dk).slice(0, 10)]
+              sql: "INSERT OR IGNORE INTO user_completed_days (user_id, day_key) VALUES (?, ?)",
+              args: [userId, String(dk).slice(0, 10)]
             });
           }
         }
         if (Array.isArray(payload.customPuzzles)) {
           for (const cp of payload.customPuzzles) {
             await client.execute({
-              sql: `INSERT OR IGNORE INTO puzzles (code, title, fen, theme, type, diff, side, solution, custom, solved)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
+              sql: `INSERT OR IGNORE INTO puzzles (code, title, fen, theme, type, diff, side, solution, custom, solved, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
               args: [
                 cp.code || `IMPORT-${Date.now() % 100000}`,
                 cp.title || cp.description || "Puzzle importé",
@@ -585,7 +784,8 @@ async function apiHandler(req, res, customUrl = null) {
                 cp.type || "tactique",
                 Number(cp.diff || cp.difficulty || 3),
                 cp.side || "Blancs",
-                cp.solution || ""
+                cp.solution || "",
+                userId
               ]
             });
           }
@@ -594,11 +794,12 @@ async function apiHandler(req, res, customUrl = null) {
           for (const cj of payload.journalContextuel) {
             await client.execute({
               sql: `INSERT INTO contextual_journal (
-                      log_id, linked_text, created_at, at_label, note,
+                      user_id, log_id, linked_text, created_at, at_label, note,
                       before_emotion, after_emotion, before_intensity, after_intensity,
                       lieu, bruit, sommeil, fatigue, pression, tag
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               args: [
+                userId,
                 cj.logId || null,
                 cj.linkedText || "Séance importée",
                 cj.createdAt || new Date().toISOString(),
@@ -618,22 +819,16 @@ async function apiHandler(req, res, customUrl = null) {
             });
           }
         }
-        await recalculateStreak(client);
-        return sendJson(res, await getFullState(customUrl), 200);
+        await recalculateStreak(client, userId);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/lichess/sync") {
         let username = String(payload.username || "").trim();
         if (!username) {
-          const uRes = await client.execute(
-            "SELECT value FROM settings WHERE key = 'lichess_username'"
-          );
-          username = String(uRes.rows[0]?.value || "").trim();
+          username = String(await getUserSetting(client, userId, "lichess_username", "") || session.username || "").trim();
         } else {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('lichess_username', ?, CURRENT_TIMESTAMP)",
-            args: [username]
-          });
+          await setUserSetting(client, userId, "lichess_username", username);
         }
 
         let effectivePgn = String(payload.raw_pgn || "").trim();
@@ -646,24 +841,25 @@ async function apiHandler(req, res, customUrl = null) {
         }
 
         if (profileData) {
-          await client.execute({
-            sql: "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('lichess_profile_json', ?, CURRENT_TIMESTAMP)",
-            args: [JSON.stringify(profileData)]
-          });
+          await setUserSetting(client, userId, "lichess_profile_json", JSON.stringify(profileData));
         }
 
-        const beforeCountRes = await client.execute("SELECT COUNT(*) AS c FROM lichess_games");
+        const beforeCountRes = await client.execute({
+          sql: "SELECT COUNT(*) AS c FROM user_lichess_games WHERE user_id = ?",
+          args: [userId]
+        });
         const beforeCount = Number(beforeCountRes.rows[0]?.c || 0);
 
         const parsedGames = effectivePgn ? parsePgnGamesBatch(effectivePgn, username) : [];
         for (const g of parsedGames) {
           await client.execute({
-            sql: `INSERT OR IGNORE INTO lichess_games (
-                    id, white, black, result, speed, played_at, pgn, hour_of_day,
+            sql: `INSERT OR IGNORE INTO user_lichess_games (
+                    user_id, game_id, white, black, result, speed, played_at, pgn, hour_of_day,
                     opening, critical_fen, critical_move_san, critical_solution_moves,
                     critical_side, critical_move_number
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
+              userId,
               g.id,
               g.white,
               g.black,
@@ -682,11 +878,14 @@ async function apiHandler(req, res, customUrl = null) {
           });
         }
 
-        const afterCountRes = await client.execute("SELECT COUNT(*) AS c FROM lichess_games");
+        const afterCountRes = await client.execute({
+          sql: "SELECT COUNT(*) AS c FROM user_lichess_games WHERE user_id = ?",
+          args: [userId]
+        });
         const afterCount = Number(afterCountRes.rows[0]?.c || 0);
         const insertedCount = Math.max(0, afterCount - beforeCount);
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.syncReport = {
           username,
           parsedCount: parsedGames.length,
@@ -702,8 +901,8 @@ async function apiHandler(req, res, customUrl = null) {
 
         if (payload.game_id) {
           const gRes = await client.execute({
-            sql: "SELECT * FROM lichess_games WHERE id = ?",
-            args: [String(payload.game_id)]
+            sql: "SELECT game_id AS id, white, black, result, speed, played_at, pgn, hour_of_day, opening, critical_fen, critical_move_san, critical_solution_moves, critical_side, critical_move_number FROM user_lichess_games WHERE user_id = ? AND game_id = ?",
+            args: [userId, String(payload.game_id)]
           });
           const gRow = gRes.rows && gRes.rows[0];
           if (!gRow) {
@@ -750,10 +949,10 @@ async function apiHandler(req, res, customUrl = null) {
         const insRes = await client.execute({
           sql: `INSERT INTO puzzles (
                   code, title, fen, theme, type, diff, side, solution, solution_moves, hint,
-                  custom, solved, attempts, box, fsrs_state, fsrs_stability, fsrs_difficulty
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 1, 0, 0.0, ?)`,
+                  custom, solved, attempts, box, fsrs_state, fsrs_stability, fsrs_difficulty, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 1, 0, 0.0, ?, ?)`,
           args: [
-            builtPuzzle.code,
+            `${builtPuzzle.code}-U${userId}`,
             builtPuzzle.title,
             builtPuzzle.fen,
             builtPuzzle.theme,
@@ -763,11 +962,12 @@ async function apiHandler(req, res, customUrl = null) {
             builtPuzzle.solution,
             JSON.stringify(builtPuzzle.solution_moves || []),
             builtPuzzle.hint,
-            builtPuzzle.fsrs_difficulty
+            builtPuzzle.fsrs_difficulty,
+            userId
           ]
         });
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.createdPuzzle = {
           ...builtPuzzle,
           id: Number(insRes.lastInsertRowid || 0)
@@ -797,7 +997,7 @@ async function apiHandler(req, res, customUrl = null) {
                   SET name = ?, fide_elo = ?, lichess_username = ?, style = ?,
                       psych_profile = ?, white_repertoire = ?, black_repertoire = ?,
                       reference_pgn = ?, match_plan = ?, updated_at = CURRENT_TIMESTAMP
-                  WHERE id = ?`,
+                  WHERE id = ? AND user_id = ?`,
             args: [
               name,
               fideElo,
@@ -808,16 +1008,18 @@ async function apiHandler(req, res, customUrl = null) {
               blackRep,
               refPgn,
               matchPlan,
-              opponentId
+              opponentId,
+              userId
             ]
           });
         } else {
           const insOpp = await client.execute({
             sql: `INSERT INTO opponents (
-                    name, fide_elo, lichess_username, style, psych_profile,
+                    user_id, name, fide_elo, lichess_username, style, psych_profile,
                     white_repertoire, black_repertoire, reference_pgn, match_plan
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
+              userId,
               name,
               fideElo,
               lichessUsername,
@@ -832,7 +1034,7 @@ async function apiHandler(req, res, customUrl = null) {
           opponentId = Number(insOpp.lastInsertRowid || 0);
         }
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.lastOpponent = updatedState.opponents.find((o) => o.id === opponentId) || null;
         return sendJson(res, updatedState, 200);
       }
@@ -871,7 +1073,7 @@ async function apiHandler(req, res, customUrl = null) {
             sql: `UPDATE opening_repertoire
                   SET side = ?, name = ?, eco = ?, moves = ?, plan = ?, start_fen = ?,
                       mastery = ?, san_moves_json = ?, final_fen = ?, updated_at = CURRENT_TIMESTAMP
-                  WHERE id = ?`,
+                  WHERE id = ? AND user_id = ?`,
             args: [
               side,
               name,
@@ -882,20 +1084,21 @@ async function apiHandler(req, res, customUrl = null) {
               mastery,
               sanMovesJson,
               finalFen,
-              lineId
+              lineId,
+              userId
             ]
           });
         } else {
           const insLine = await client.execute({
             sql: `INSERT INTO opening_repertoire (
-                    side, name, eco, moves, plan, start_fen, mastery, san_moves_json, final_fen
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [side, name, eco, movesText, plan, startFen, mastery, sanMovesJson, finalFen]
+                    user_id, side, name, eco, moves, plan, start_fen, mastery, san_moves_json, final_fen
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [userId, side, name, eco, movesText, plan, startFen, mastery, sanMovesJson, finalFen]
           });
           lineId = Number(insLine.lastInsertRowid || 0);
         }
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.lastOpeningLine =
           updatedState.openingRepertoire.find((l) => l.id === lineId) || null;
         return sendJson(res, updatedState, 200);
@@ -905,8 +1108,8 @@ async function apiHandler(req, res, customUrl = null) {
         const lineId = Number(payload.id);
         const rating = Number(payload.rating || 3);
         const rowRes = await client.execute({
-          sql: "SELECT * FROM opening_repertoire WHERE id = ?",
-          args: [lineId]
+          sql: "SELECT * FROM opening_repertoire WHERE id = ? AND user_id = ?",
+          args: [lineId, userId]
         });
         const row = rowRes.rows && rowRes.rows[0];
         if (!row) {
@@ -925,7 +1128,7 @@ async function apiHandler(req, res, customUrl = null) {
                     fsrs_last_review = ?,
                     fsrs_due_date = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?`,
+                WHERE id = ? AND user_id = ?`,
           args: [
             rev.mastery,
             rev.fsrs_state,
@@ -935,11 +1138,12 @@ async function apiHandler(req, res, customUrl = null) {
             rev.fsrs_lapses,
             rev.fsrs_last_review,
             rev.fsrs_due_date,
-            lineId
+            lineId,
+            userId
           ]
         });
 
-        const updatedState = await getFullState(customUrl);
+        const updatedState = await getFullState(customUrl, userId);
         updatedState.lastOpeningReview = rev;
         return sendJson(res, updatedState, 200);
       }
@@ -947,25 +1151,25 @@ async function apiHandler(req, res, customUrl = null) {
       if (pathname === "/api/reset") {
         createBackup(true, customUrl);
         await client.batch([
-          "DELETE FROM contextual_journal",
-          "DELETE FROM logs",
-          "DELETE FROM completed_days",
-          "DELETE FROM blindage_entries",
-          "DELETE FROM fsrs_review_logs",
-          "DELETE FROM lichess_games",
-          "DELETE FROM opponents",
-          "DELETE FROM opening_repertoire",
-          "DELETE FROM puzzles WHERE custom = 1",
-          "UPDATE puzzles SET solved = 0, attempts = 0, box = 1, best_time_sec = 0, fsrs_state = 0, fsrs_stability = 0, fsrs_reps = 0, fsrs_lapses = 0, fsrs_last_review = NULL, fsrs_due_date = NULL",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('xp', '0')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('streak', '0')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('total_min', '0')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('attempts', '0')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('solved_count', '0')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('endurance_sessions_json', '[]')",
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('lichess_profile_json', 'null')"
+          { sql: "DELETE FROM contextual_journal WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM logs WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM user_completed_days WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM blindage_entries WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM fsrs_review_logs WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM user_lichess_games WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM opponents WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM opening_repertoire WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM user_puzzle_progress WHERE user_id = ?", args: [userId] },
+          { sql: "DELETE FROM puzzles WHERE custom = 1 AND user_id = ?", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'xp', '0')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'streak', '0')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'total_min', '0')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'attempts', '0')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'solved_count', '0')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'endurance_sessions_json', '[]')", args: [userId] },
+          { sql: "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, 'lichess_profile_json', 'null')", args: [userId] }
         ]);
-        return sendJson(res, await getFullState(customUrl), 200);
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       return sendJson(res, { error: `Route POST inconnue: ${pathname}` }, 404);
@@ -980,37 +1184,37 @@ async function apiHandler(req, res, customUrl = null) {
         const idNum = Number(idParam);
         if (pathname === "/api/journal") {
           await client.execute({
-            sql: "DELETE FROM contextual_journal WHERE id = ?",
-            args: [idNum]
+            sql: "DELETE FROM contextual_journal WHERE id = ? AND user_id = ?",
+            args: [idNum, userId]
           });
         } else if (pathname === "/api/logs") {
           await client.execute({
-            sql: "DELETE FROM logs WHERE id = ?",
-            args: [idNum]
+            sql: "DELETE FROM logs WHERE id = ? AND user_id = ?",
+            args: [idNum, userId]
           });
         } else if (pathname === "/api/puzzles") {
           await client.execute({
-            sql: "DELETE FROM puzzles WHERE id = ? AND custom = 1",
-            args: [idNum]
+            sql: "DELETE FROM puzzles WHERE id = ? AND custom = 1 AND user_id = ?",
+            args: [idNum, userId]
           });
         } else if (pathname === "/api/lichess") {
           await client.execute({
-            sql: "DELETE FROM lichess_games WHERE id = ?",
-            args: [String(idParam)]
+            sql: "DELETE FROM user_lichess_games WHERE game_id = ? AND user_id = ?",
+            args: [String(idParam), userId]
           });
         } else if (pathname === "/api/opponents") {
           await client.execute({
-            sql: "DELETE FROM opponents WHERE id = ?",
-            args: [idNum]
+            sql: "DELETE FROM opponents WHERE id = ? AND user_id = ?",
+            args: [idNum, userId]
           });
         } else if (pathname === "/api/openings") {
           await client.execute({
-            sql: "DELETE FROM opening_repertoire WHERE id = ?",
-            args: [idNum]
+            sql: "DELETE FROM opening_repertoire WHERE id = ? AND user_id = ?",
+            args: [idNum, userId]
           });
         }
       }
-      return sendJson(res, await getFullState(customUrl), 200);
+      return sendJson(res, await getFullState(customUrl, userId), 200);
     }
 
     return sendJson(res, { error: `Méthode non supportée: ${req.method}` }, 405);

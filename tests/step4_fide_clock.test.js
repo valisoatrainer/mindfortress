@@ -12,7 +12,10 @@ const http = require("node:http");
 const ValisoaChessLite = require("../vendor/ValisoaChessLite.js");
 const ValisoaFideClock = require("../db/fide_clock.js");
 const { initDatabase } = require("../db/init.js");
+const { upsertLichessUser, createSessionToken, SESSION_COOKIE_NAME } = require("../db/auth.js");
 const apiHandler = require("../api/index.js");
+
+let testCookieHeader = "";
 
 const TEST_DB_PATH = path.join(__dirname, "test_step4.db");
 const TEST_DB_URL = `file:${TEST_DB_PATH}`;
@@ -37,12 +40,15 @@ function callApi(serverPort, method, urlPath, bodyObj = null) {
         port: serverPort,
         path: urlPath,
         method,
-        headers: payload
-          ? {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(payload)
-            }
-          : {}
+        headers: {
+          ...(testCookieHeader ? { Cookie: testCookieHeader } : {}),
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {})
+        }
       },
       (res) => {
         let data = "";
@@ -202,6 +208,8 @@ async function runTests() {
   console.log("▶ Test 4 : Vérification de la sauvegarde SQLite via POST /api/endurance...");
   cleanupTestDb();
   const client = await initDatabase(TEST_DB_URL);
+  const testUser = await upsertLichessUser(client, { id: "step4_tester", username: "Step4Tester" });
+  testCookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionToken(testUser))}`;
 
   const server = http.createServer((req, res) => apiHandler(req, res, TEST_DB_URL));
   const testPort = 18768;

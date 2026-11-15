@@ -14,7 +14,8 @@
     "test:step5": "node tests/step5_lichess_sync.test.js",
     "test:step6": "node tests/step6_scouting_openings.test.js",
     "test:step7": "node tests/step7_analytics_deploy.test.js",
-    "test": "node tests/step1_db_turso.test.js && node tests/step2_valisoachess.test.js && node tests/step3_fsrs.test.js && node tests/step4_fide_clock.test.js && node tests/step5_lichess_sync.test.js && node tests/step6_scouting_openings.test.js && node tests/step7_analytics_deploy.test.js"
+    "test:step8": "node tests/step8_lichess_auth_multiuser.test.js",
+    "test": "node tests/step1_db_turso.test.js && node tests/step2_valisoachess.test.js && node tests/step3_fsrs.test.js && node tests/step4_fide_clock.test.js && node tests/step5_lichess_sync.test.js && node tests/step6_scouting_openings.test.js && node tests/step7_analytics_deploy.test.js && node tests/step8_lichess_auth_multiuser.test.js"
   },
   "dependencies": {
     "@libsql/client": "^0.17.0"

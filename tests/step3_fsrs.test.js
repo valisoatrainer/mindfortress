@@ -11,7 +11,10 @@ const http = require("node:http");
 
 const ValisoaFSRS = require("../db/fsrs.js");
 const { initDatabase } = require("../db/init.js");
+const { upsertLichessUser, createSessionToken, SESSION_COOKIE_NAME } = require("../db/auth.js");
 const apiHandler = require("../api/index.js");
+
+let testCookieHeader = "";
 
 const TEST_DB_PATH = path.join(__dirname, "test_step3.db");
 const TEST_DB_URL = `file:${TEST_DB_PATH}`;
@@ -36,12 +39,15 @@ function callApi(serverPort, method, urlPath, bodyObj = null) {
         port: serverPort,
         path: urlPath,
         method,
-        headers: payload
-          ? {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(payload)
-            }
-          : {}
+        headers: {
+          ...(testCookieHeader ? { Cookie: testCookieHeader } : {}),
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {})
+        }
       },
       (res) => {
         let data = "";
@@ -183,6 +189,8 @@ async function runTests() {
   console.log("▶ Test 4 : Vérification de l'API SQLite (/api/puzzles/solve, /api/puzzles/due, /api/woodpecker/cycle)...");
   cleanupTestDb();
   const client = await initDatabase(TEST_DB_URL);
+  const testUser = await upsertLichessUser(client, { id: "step3_tester", username: "Step3Tester" });
+  testCookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionToken(testUser))}`;
 
   const server = http.createServer((req, res) => apiHandler(req, res, TEST_DB_URL));
   const testPort = 18767;
@@ -218,8 +226,8 @@ async function runTests() {
     // 3. Simuler dans SQLite que le Puzzle #2 a son fsrs_due_date arrivé à échéance (maintenant - 1 min)
     const pastIso = new Date(Date.now() - 60 * 1000).toISOString();
     await client.execute({
-      sql: "UPDATE puzzles SET fsrs_due_date = ? WHERE id = 2",
-      args: [pastIso]
+      sql: "UPDATE user_puzzle_progress SET fsrs_due_date = ? WHERE puzzle_id = 2 AND user_id = ?",
+      args: [pastIso, testUser.id]
     });
 
     // 4. Vérifier que la table fsrs_review_logs contient bien les 2 révisions enregistrées

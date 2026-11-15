@@ -4,10 +4,30 @@
 
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lichess_id TEXT UNIQUE NOT NULL,
+    username TEXT NOT NULL,
+    perfs_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_lichess_id ON users(lichess_id);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS puzzles (
@@ -38,8 +58,33 @@ CREATE TABLE IF NOT EXISTS puzzles (
     fsrs_last_review TEXT,
     fsrs_due_date TEXT,
     woodpecker_cycle INTEGER NOT NULL DEFAULT 1,
+    user_id INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS user_puzzle_progress (
+    user_id INTEGER NOT NULL,
+    puzzle_id INTEGER NOT NULL,
+    solved INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    best_time_sec INTEGER NOT NULL DEFAULT 0,
+    box INTEGER NOT NULL DEFAULT 1,
+    fsrs_state INTEGER NOT NULL DEFAULT 0,
+    fsrs_stability REAL NOT NULL DEFAULT 0.0,
+    fsrs_difficulty REAL NOT NULL DEFAULT 5.0,
+    fsrs_elapsed_days INTEGER NOT NULL DEFAULT 0,
+    fsrs_scheduled_days INTEGER NOT NULL DEFAULT 0,
+    fsrs_reps INTEGER NOT NULL DEFAULT 0,
+    fsrs_lapses INTEGER NOT NULL DEFAULT 0,
+    fsrs_last_review TEXT,
+    fsrs_due_date TEXT,
+    woodpecker_cycle INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, puzzle_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (puzzle_id) REFERENCES puzzles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_upp_user ON user_puzzle_progress(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_puzzles_theme ON puzzles(theme);
 CREATE INDEX IF NOT EXISTS idx_puzzles_box ON puzzles(box);
@@ -47,6 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_puzzles_fsrs_due ON puzzles(fsrs_due_date);
 
 CREATE TABLE IF NOT EXISTS fsrs_review_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     puzzle_id INTEGER NOT NULL,
     rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 4), -- 1: Again, 2: Hard, 3: Good, 4: Easy
     state INTEGER NOT NULL DEFAULT 0,
@@ -64,6 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_fsrs_logs_date ON fsrs_review_logs(reviewed_at);
 
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     at_label TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     type TEXT NOT NULL DEFAULT 'Force',
@@ -85,6 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type);
 
 CREATE TABLE IF NOT EXISTS contextual_journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     log_id INTEGER,
     linked_text TEXT DEFAULT 'Séance libre — hors log',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -113,8 +161,19 @@ CREATE TABLE IF NOT EXISTS completed_days (
     notes TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS user_completed_days (
+    user_id INTEGER NOT NULL,
+    day_key TEXT NOT NULL,
+    status TEXT DEFAULT 'done',
+    sessions_count INTEGER DEFAULT 1,
+    notes TEXT DEFAULT '',
+    PRIMARY KEY (user_id, day_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS blindage_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     wish TEXT DEFAULT '',
     outcome TEXT DEFAULT '',
@@ -141,8 +200,30 @@ CREATE TABLE IF NOT EXISTS lichess_games (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_lichess_games (
+    user_id INTEGER NOT NULL,
+    game_id TEXT NOT NULL,
+    white TEXT,
+    black TEXT,
+    result TEXT,
+    speed TEXT,
+    played_at TEXT,
+    pgn TEXT NOT NULL,
+    hour_of_day INTEGER,
+    opening TEXT DEFAULT 'Ouverture Classique',
+    critical_fen TEXT DEFAULT '',
+    critical_move_san TEXT DEFAULT '',
+    critical_solution_moves TEXT DEFAULT '[]',
+    critical_side TEXT DEFAULT 'Blancs',
+    critical_move_number INTEGER DEFAULT 15,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, game_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS opponents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     name TEXT NOT NULL,
     fide_elo INTEGER,
     lichess_username TEXT DEFAULT '',
@@ -157,6 +238,7 @@ CREATE TABLE IF NOT EXISTS opponents (
 
 CREATE TABLE IF NOT EXISTS opening_repertoire (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
     side TEXT NOT NULL DEFAULT 'Blancs',
     name TEXT NOT NULL,
     eco TEXT DEFAULT '',

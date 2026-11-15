@@ -19,7 +19,10 @@ const {
   reviewOpeningLineFSRS
 } = require("../db/scouting");
 const ValisoaChessLite = require("../vendor/ValisoaChessLite");
+const { upsertLichessUser, createSessionToken, SESSION_COOKIE_NAME } = require("../db/auth");
 const apiHandler = require("../api/index");
+
+let testCookieHeader = "";
 
 function cleanupTestDb() {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -41,12 +44,15 @@ function httpRequest(port, method, reqPath, bodyObj = null) {
         port,
         path: reqPath,
         method,
-        headers: payload
-          ? {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(payload)
-            }
-          : {}
+        headers: {
+          ...(testCookieHeader ? { Cookie: testCookieHeader } : {}),
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {})
+        }
       },
       (res) => {
         let data = "";
@@ -74,7 +80,9 @@ async function runTests() {
   cleanupTestDb();
 
   try {
-    await initDatabase(TEST_DB_URL);
+    const dbClient = await initDatabase(TEST_DB_URL);
+    const testUser = await upsertLichessUser(dbClient, { id: "step6_tester", username: "Step6Tester" });
+    testCookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionToken(testUser))}`;
 
     const server = http.createServer((req, res) => {
       if (req.url === "/vendor/ValisoaScoutingOpenings.js") {

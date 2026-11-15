@@ -59,5 +59,6 @@ git push -u origin main
 3. Dans **Environment Variables** sur Vercel, ajoute :
    - `TURSO_DATABASE_URL` = `libsql://mindfortress-valisoadev.turso.io`
    - `TURSO_AUTH_TOKEN` = `ton_token_turso`
+   - `AUTH_SECRET` = une chaîne secrète aléatoire (32+ caractères) pour signer les cookies de session Lichess OAuth 2.0 PKCE
 4. Clique sur **Deploy** :
    - Le fichier [`vercel.json`](file:///d:/Chess/MIND%20FORTRESS/vercel.json) route automatiquement toutes les requêtes `/api/*` vers la fonction Serverless [`api/index.js`](file:///d:/Chess/MIND%20FORTRESS/api/index.js) et sert l'application unifiée ainsi que tes bibliothèques `vendor/Valisoa*.js`.
