@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const SESSION_COOKIE_NAME = "mf_session";
 const PKCE_COOKIE_NAME = "mf_oauth_pkce";
 const LICHESS_CLIENT_ID = process.env.LICHESS_CLIENT_ID || "mind-fortress";
+const LICHESS_OAUTH_SCOPES = "preference:read puzzle:read puzzle:write";
 const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30; // 30 jours
 const PKCE_MAX_AGE_SEC = 60 * 10; // 10 minutes
 
@@ -253,10 +254,49 @@ async function upsertLichessUser(client, lichessAccount) {
   return user;
 }
 
+async function saveUserLichessToken(client, userId, accessToken) {
+  if (!accessToken || !userId) return;
+  const key = crypto.createHash("sha256").update(getAuthSecret()).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(accessToken), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const packed = `${base64UrlEncode(iv)}.${base64UrlEncode(tag)}.${base64UrlEncode(encrypted)}`;
+  await client.execute({
+    sql: `INSERT INTO user_settings (user_id, key, value, updated_at)
+          VALUES (?, 'lichess_oauth_token_enc', ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    args: [Number(userId), packed]
+  });
+}
+
+async function getUserLichessToken(client, userId) {
+  if (!userId) return null;
+  const res = await client.execute({
+    sql: "SELECT value FROM user_settings WHERE user_id = ? AND key = 'lichess_oauth_token_enc'",
+    args: [Number(userId)]
+  });
+  const packed = res.rows[0]?.value;
+  if (!packed || typeof packed !== "string") return null;
+  const parts = packed.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const [ivB64, tagB64, dataB64] = parts;
+    const key = crypto.createHash("sha256").update(getAuthSecret()).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, base64UrlDecodeToBuffer(ivB64));
+    decipher.setAuthTag(base64UrlDecodeToBuffer(tagB64));
+    const decrypted = Buffer.concat([decipher.update(base64UrlDecodeToBuffer(dataB64)), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch (_e) {
+    return null;
+  }
+}
+
 module.exports = {
   SESSION_COOKIE_NAME,
   PKCE_COOKIE_NAME,
   LICHESS_CLIENT_ID,
+  LICHESS_OAUTH_SCOPES,
   SESSION_MAX_AGE_SEC,
   PKCE_MAX_AGE_SEC,
   signToken,
@@ -271,5 +311,7 @@ module.exports = {
   resolveRequestOrigin,
   buildDefaultUserSettings,
   ensureUserDefaults,
-  upsertLichessUser
+  upsertLichessUser,
+  saveUserLichessToken,
+  getUserLichessToken
 };

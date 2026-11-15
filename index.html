@@ -2711,6 +2711,15 @@ function Oa() {
     [woodpeckerCycle, setWoodpeckerCycle] = $.useState(1),
     [fsrsMap, setFsrsMap] = $.useState({}),
     [fsrsReviewLogs, setFsrsReviewLogs] = $.useState([]),
+    [lichessStreamPuzzle, setLichessStreamPuzzle] = $.useState(null),
+    [lichessStreamAngle, setLichessStreamAngle] = $.useState("mix"),
+    [lichessStreamDifficulty, setLichessStreamDifficulty] = $.useState("normal"),
+    [lichessStreamLoading, setLichessStreamLoading] = $.useState(false),
+    [lichessStreamError, setLichessStreamError] = $.useState(""),
+    [lichessStreamRequiresReauth, setLichessStreamRequiresReauth] = $.useState(false),
+    [lichessStreamSavedIds, setLichessStreamSavedIds] = $.useState({}),
+    [lichessStreamSolvedCount, setLichessStreamSolvedCount] = $.useState(0),
+    [lichessStreamSyncEnabled, setLichessStreamSyncEnabled] = $.useState(true),
     [sl, Qa] = $.useState("all"),
     [Gu, xd] = $.useState(""),
     [Zu, jd] = $.useState(false),
@@ -3035,17 +3044,122 @@ function Oa() {
         avgRetrievabilityPct: 0
       };
     }, [ti]),
-    Le = dueQueue[dailyPuzzleIndex % Math.max(1, dueQueue.length)] || ti[0] || Da[0],
+    Le =
+      trainingMode === "lichess_stream" && lichessStreamPuzzle
+        ? lichessStreamPuzzle
+        : dueQueue[dailyPuzzleIndex % Math.max(1, dueQueue.length)] || ti[0] || Da[0],
     lePreviews = $.useMemo(() => {
       return window.ValisoaFSRS && Le ? window.ValisoaFSRS.previewRatings(Le, new Date()) : null;
     }, [Le]),
     Re = rh(new Date()),
     Za = m > 0 ? Math.round((y / m) * 100) : 0;
 
+  async function fetchNextLichessStreamPuzzle(angleOverride = null, diffOverride = null) {
+    let ang = angleOverride !== null ? angleOverride : lichessStreamAngle;
+    let dif = diffOverride !== null ? diffOverride : lichessStreamDifficulty;
+    setLichessStreamLoading(true);
+    setLichessStreamError("");
+    try {
+      let res = await fetch(
+        `/api/lichess/puzzle/next?angle=${encodeURIComponent(ang)}&difficulty=${encodeURIComponent(dif)}`,
+        { credentials: "same-origin" }
+      );
+      let data = await res.json();
+      if (!res.ok || !data.ok || !data.puzzle) {
+        throw new Error(data.error || "Impossible de charger le puzzle Lichess.");
+      }
+      setLichessStreamPuzzle(data.puzzle);
+      setLichessStreamRequiresReauth(Boolean(data.requires_reauth));
+      setBoardFlipped(data.puzzle.side === "Noirs");
+      jd(false);
+      setShowDailyHint(false);
+      Va(0);
+    } catch (err) {
+      setLichessStreamError(err.message || "Erreur réseau Lichess");
+      Ze(`⚠️ ${err.message || "Erreur réseau Lichess"}`);
+    } finally {
+      setLichessStreamLoading(false);
+    }
+  }
+
+  async function completeLichessStreamPuzzle(puzzleObj, win) {
+    if (!puzzleObj || !puzzleObj.lichessId) return;
+    if (win) setLichessStreamSolvedCount((c) => c + 1);
+    jd(true);
+    if (!lichessStreamSyncEnabled) {
+      Ze(win ? `🏆 Puzzle Lichess #${puzzleObj.lichessId} résolu !` : `❌ Raté · Vérifie la solution.`);
+      return;
+    }
+    try {
+      let res = await fetch("/api/lichess/puzzle/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          lichessId: puzzleObj.lichessId,
+          win: Boolean(win),
+          angle: lichessStreamAngle,
+          rated: true
+        })
+      });
+      let data = await res.json();
+      if (data.requires_reauth) {
+        setLichessStreamRequiresReauth(true);
+      }
+      Ze(
+        win
+          ? data.synced
+            ? `🏆 Puzzle #${puzzleObj.lichessId} résolu & synchronisé sur Lichess !`
+            : `🏆 Puzzle #${puzzleObj.lichessId} résolu (non synchronisé)`
+          : `❌ Puzzle #${puzzleObj.lichessId} raté${data.synced ? " · Synchronisé Lichess" : ""}`
+      );
+    } catch (_e) {
+      Ze(win ? `🏆 Puzzle #${puzzleObj.lichessId} résolu !` : `❌ Raté.`);
+    }
+  }
+
+  async function saveLichessPuzzleToWoodpecker(puzzleObj) {
+    if (!puzzleObj || !puzzleObj.lichessId) return;
+    try {
+      let res = await fetch("/api/lichess/puzzle/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          lichessId: puzzleObj.lichessId,
+          title: puzzleObj.title,
+          fen: puzzleObj.fen,
+          theme: puzzleObj.theme,
+          diff: puzzleObj.diff,
+          side: puzzleObj.side,
+          solution: puzzleObj.solution,
+          solution_moves: puzzleObj.solution_moves,
+          hint: puzzleObj.hint
+        })
+      });
+      let data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur sauvegarde");
+      if (typeof applyServerState === "function" && data.puzzles) {
+        applyServerState(data);
+      }
+      setLichessStreamSavedIds((prev) => ({ ...prev, [puzzleObj.lichessId]: true }));
+      Ze(`🪵 Puzzle #${puzzleObj.lichessId} ajouté à votre Woodpecker / FSRS !`);
+    } catch (err) {
+      Ze(`⚠️ ${err.message || "Erreur lors de l'ajout au Woodpecker"}`);
+    }
+  }
+
   async function changeTrainingMode(newMode) {
     setTrainingMode(newMode);
     setDailyPuzzleIndex(0);
     await syncSettingsToServer({ training_mode: newMode });
+    if (newMode === "lichess_stream") {
+      Ze("⚡ Mode Flux Tactique Lichess activé · Puzzles en continu");
+      if (!lichessStreamPuzzle) {
+        fetchNextLichessStreamPuzzle();
+      }
+      return;
+    }
     Ze(
       newMode === "fsrs"
         ? "🧠 Mode FSRS activé (Rétention cible 90% · Tri par probabilité de rappel R)"
@@ -4924,12 +5038,86 @@ function Oa() {
                                           : "bg-[#181826] text-[#A7A9BE] border-[#26263A] hover:text-white"
                                       }`,
                                       children: `🪵 Cycle Woodpecker ${woodpeckerCycle}/5 (Tikkanen)`
+                                    }),
+                                    f("button", {
+                                      type: "button",
+                                      onClick: () => changeTrainingMode("lichess_stream"),
+                                      className: `px-3 py-1 rounded-full text-[11px] font-bold border transition ${
+                                        trainingMode === "lichess_stream"
+                                          ? "bg-emerald-400 text-black border-emerald-400"
+                                          : "bg-[#181826] text-[#A7A9BE] border-[#26263A] hover:text-white"
+                                      }`,
+                                      children: `⚡ Flux Lichess${lichessStreamSolvedCount > 0 ? ` (${lichessStreamSolvedCount})` : ""}`
                                     })
                                   ]
                                 }),
+                                trainingMode === "lichess_stream" &&
+                                  d("div", {
+                                    className: "mt-3 flex flex-wrap items-center gap-2 bg-[#0A0A0F] border border-emerald-500/30 rounded-2xl p-2.5",
+                                    children: [
+                                      d("select", {
+                                        value: lichessStreamAngle,
+                                        onChange: (ev) => {
+                                          const nextAng = ev.target.value;
+                                          setLichessStreamAngle(nextAng);
+                                          fetchNextLichessStreamPuzzle(nextAng, lichessStreamDifficulty);
+                                        },
+                                        className: "bg-[#12121C] border border-[#26263A] rounded-full px-3 py-1.5 text-xs font-bold text-white",
+                                        children: [
+                                          f("option", { value: "mix", children: "🎯 Thème : Mix adapté Elo" }),
+                                          f("option", { value: "daily", children: "📅 Puzzle du jour (Daily)" }),
+                                          f("option", { value: "fork", children: "⚔️ Fourchette (Fork)" }),
+                                          f("option", { value: "pin", children: "📌 Clouage (Pin)" }),
+                                          f("option", { value: "mateIn2", children: "👑 Mat en 2" }),
+                                          f("option", { value: "mateIn3", children: "👑 Mat en 3" }),
+                                          f("option", { value: "endgame", children: "♟️ Finales (Endgame)" }),
+                                          f("option", { value: "sacrifice", children: "🔥 Sacrifice" }),
+                                          f("option", { value: "discoveredAttack", children: "⚡ Attaque à la découverte" }),
+                                          f("option", { value: "defensiveMove", children: "🛡️ Coup défensif" }),
+                                          f("option", { value: "veryLong", children: "🧠 Très long calcul" })
+                                        ]
+                                      }),
+                                      d("select", {
+                                        value: lichessStreamDifficulty,
+                                        onChange: (ev) => {
+                                          const nextDiff = ev.target.value;
+                                          setLichessStreamDifficulty(nextDiff);
+                                          fetchNextLichessStreamPuzzle(lichessStreamAngle, nextDiff);
+                                        },
+                                        className: "bg-[#12121C] border border-[#26263A] rounded-full px-3 py-1.5 text-xs font-bold text-white",
+                                        children: [
+                                          f("option", { value: "easiest", children: "Niveau : Très facile" }),
+                                          f("option", { value: "easier", children: "Niveau : Facile" }),
+                                          f("option", { value: "normal", children: "Niveau : Normal (Elo)" }),
+                                          f("option", { value: "harder", children: "Niveau : Difficile" }),
+                                          f("option", { value: "hardest", children: "Niveau : Très difficile" })
+                                        ]
+                                      }),
+                                      f("button", {
+                                        type: "button",
+                                        onClick: () => setLichessStreamSyncEnabled((v) => !v),
+                                        className: `px-3 py-1.5 rounded-full text-[11px] font-bold border ${
+                                          lichessStreamSyncEnabled
+                                            ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                                            : "bg-[#181826] border-[#26263A] text-[#A7A9BE]"
+                                        }`,
+                                        children: lichessStreamSyncEnabled ? "🔄 Sync Elo Lichess ON" : "⏸️ Sync Elo OFF"
+                                      }),
+                                      lichessStreamRequiresReauth &&
+                                        d("a", {
+                                          href: "/api/auth/lichess/login",
+                                          className: "px-3 py-1.5 rounded-full text-[11px] font-bold bg-[#FFD700] text-black hover:opacity-90",
+                                          children: "🔑 Reconnecter Lichess (puzzle:read/write)"
+                                        })
+                                    ]
+                                  }),
                                 d("h2", {
                                   className: "text-2xl font-extrabold mt-2",
-                                  children: ["Puzzle du jour — ", Le.code ? `${Le.code} · ` : "", Le.title]
+                                  children: [
+                                    trainingMode === "lichess_stream" ? "⚡ Flux Lichess — " : "Puzzle du jour — ",
+                                    Le.code ? `${Le.code} · ` : "",
+                                    Le.title
+                                  ]
                                 }),
                                 d("p", {
                                   className: "text-sm text-[#A7A9BE]",
@@ -4958,14 +5146,24 @@ function Oa() {
                                       children: [f(Vt, { size: 13 }), "Reset"]
                                     }),
                                     d("button", {
+                                      disabled: lichessStreamLoading,
                                       onClick: () => {
+                                        if (trainingMode === "lichess_stream") {
+                                          fetchNextLichessStreamPuzzle();
+                                          return;
+                                        }
                                         setDailyPuzzleIndex((idx) => (idx + 1) % ti.length);
                                         jd(false);
                                         setShowDailyHint(false);
                                         Va(0);
                                       },
-                                      className: "px-3 py-1.5 rounded-full bg-[#181826] border border-[#3A3A58] text-xs font-bold hover:border-[#5B8CFF]",
-                                      children: "Suivant →"
+                                      className: "px-3 py-1.5 rounded-full bg-[#181826] border border-[#3A3A58] text-xs font-bold hover:border-[#5B8CFF] disabled:opacity-50",
+                                      children:
+                                        trainingMode === "lichess_stream"
+                                          ? lichessStreamLoading
+                                            ? "Chargement…"
+                                            : "⚡ Puzzle suivant →"
+                                          : "Suivant →"
                                     })
                                   ]
                                 })
@@ -4985,7 +5183,10 @@ function Oa() {
                                   flipped: boardFlipped,
                                   blindfold: blindfoldMode,
                                   interactive: true,
-                                  onSolved: (hadMistake) => Ja(Le, !hadMistake)
+                                  onSolved: (hadMistake) =>
+                                    trainingMode === "lichess_stream"
+                                      ? completeLichessStreamPuzzle(Le, !hadMistake)
+                                      : Ja(Le, !hadMistake)
                                 }),
                                 d("div", {
                                   className: "flex gap-2 justify-between",
@@ -5061,7 +5262,33 @@ function Oa() {
                                       onClick: () => jd((o) => !o),
                                       className: "px-4 py-2.5 rounded-full border border-[#3A3A58] text-sm font-bold flex gap-2 items-center",
                                       children: [Zu ? f(Lr, { size: 16 }) : f(Jr, { size: 16 }), Zu ? "Masquer la solution" : "Révéler la solution"]
-                                    })
+                                    }),
+                                    trainingMode === "lichess_stream" &&
+                                      Le &&
+                                      Le.lichessId &&
+                                      d("button", {
+                                        type: "button",
+                                        disabled: Boolean(lichessStreamSavedIds[Le.lichessId]),
+                                        onClick: () => saveLichessPuzzleToWoodpecker(Le),
+                                        className: `px-4 py-2.5 rounded-full text-sm font-extrabold flex gap-2 items-center transition ${
+                                          lichessStreamSavedIds[Le.lichessId]
+                                            ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
+                                            : "bg-[#FFD700] text-black hover:opacity-90"
+                                        }`,
+                                        children: lichessStreamSavedIds[Le.lichessId]
+                                          ? "✅ Ajouté au Woodpecker"
+                                          : "🪵 Ajouter au Woodpecker / FSRS"
+                                      }),
+                                    trainingMode === "lichess_stream" &&
+                                      Le &&
+                                      Le.url &&
+                                      d("a", {
+                                        href: Le.url,
+                                        target: "_blank",
+                                        rel: "noopener",
+                                        className: "px-4 py-2.5 rounded-full bg-[#181826] border border-[#26263A] text-xs font-bold text-[#AFC6FF] flex items-center hover:border-[#5B8CFF]",
+                                        children: "Voir sur Lichess ↗"
+                                      })
                                   ]
                                 }),
                                 showDailyHint &&

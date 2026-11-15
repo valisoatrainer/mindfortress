@@ -20,6 +20,7 @@ const {
   convertPositionToFsrsPuzzle,
   fetchLichessRemoteData
 } = require("../db/lichess");
+const { convertLichessPuzzle } = require("../db/lichessPuzzles");
 const {
   parseOpeningLineMoves,
   parseOpponentReferencePgn,
@@ -30,6 +31,7 @@ const {
   SESSION_COOKIE_NAME,
   PKCE_COOKIE_NAME,
   LICHESS_CLIENT_ID,
+  LICHESS_OAUTH_SCOPES,
   SESSION_MAX_AGE_SEC,
   PKCE_MAX_AGE_SEC,
   signToken,
@@ -42,7 +44,9 @@ const {
   createSessionToken,
   getSessionFromRequest,
   resolveRequestOrigin,
-  upsertLichessUser
+  upsertLichessUser,
+  saveUserLichessToken,
+  getUserLichessToken
 } = require("../db/auth");
 
 let initializedForUrl = null;
@@ -158,7 +162,7 @@ async function apiHandler(req, res, customUrl = null) {
         `https://lichess.org/oauth?response_type=code` +
         `&client_id=${encodeURIComponent(LICHESS_CLIENT_ID)}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&scope=${encodeURIComponent("preference:read")}` +
+        `&scope=${encodeURIComponent(LICHESS_OAUTH_SCOPES)}` +
         `&code_challenge_method=S256` +
         `&code_challenge=${encodeURIComponent(codeChallenge)}` +
         `&state=${encodeURIComponent(state)}`;
@@ -226,6 +230,7 @@ async function apiHandler(req, res, customUrl = null) {
 
       const accountData = await accountRes.json();
       const user = await upsertLichessUser(client, accountData);
+      await saveUserLichessToken(client, user.id, tokenJson.access_token);
       const sessionToken = createSessionToken(user);
 
       appendSetCookie(
@@ -278,11 +283,13 @@ async function apiHandler(req, res, customUrl = null) {
       try {
         if (userRow.perfs_json) perfs = JSON.parse(userRow.perfs_json);
       } catch (_e) {}
+      const lichessToken = await getUserLichessToken(client, session.userId);
       return sendJson(
         res,
         {
           ok: true,
           authenticated: true,
+          has_puzzle_scope: Boolean(lichessToken),
           user: {
             id: Number(userRow.id),
             lichess_id: userRow.lichess_id,
@@ -347,6 +354,63 @@ async function apiHandler(req, res, customUrl = null) {
             advancedAnalytics: state.advancedAnalytics,
             sqlAggregations,
             chronobiologyReport: state.chronobiologyReport
+          },
+          200
+        );
+      }
+
+      if (pathname === "/api/lichess/puzzle/next") {
+        const angleParam = String(parsedUrl.searchParams.get("angle") || "mix").trim();
+        const diffParam = String(parsedUrl.searchParams.get("difficulty") || "normal").trim();
+        const lichessToken = await getUserLichessToken(client, userId);
+
+        let targetUrl = "https://lichess.org/api/puzzle/next";
+        if (angleParam === "daily") {
+          targetUrl = "https://lichess.org/api/puzzle/daily";
+        } else {
+          const qs = new URLSearchParams();
+          if (angleParam && angleParam !== "all" && angleParam !== "mix") {
+            qs.set("angle", angleParam);
+          }
+          if (diffParam && ["easiest", "easier", "normal", "harder", "hardest"].includes(diffParam)) {
+            qs.set("difficulty", diffParam);
+          }
+          const qsStr = qs.toString();
+          if (qsStr) targetUrl += `?${qsStr}`;
+        }
+
+        const headers = { Accept: "application/json" };
+        if (lichessToken) {
+          headers.Authorization = `Bearer ${lichessToken}`;
+        }
+
+        let lRes = await fetch(targetUrl, { headers });
+        let requiresReauth = !lichessToken;
+
+        if ((lRes.status === 401 || lRes.status === 403) && lichessToken) {
+          requiresReauth = true;
+          lRes = await fetch("https://lichess.org/api/puzzle/daily", {
+            headers: { Accept: "application/json" }
+          });
+        }
+
+        if (!lRes.ok) {
+          return sendJson(
+            res,
+            { ok: false, error: `Erreur API Lichess Puzzles (${lRes.status})`, requires_reauth: requiresReauth },
+            502
+          );
+        }
+
+        const rawPuzzle = await lRes.json();
+        const converted = convertLichessPuzzle(rawPuzzle);
+        return sendJson(
+          res,
+          {
+            ok: true,
+            puzzle: converted,
+            has_puzzle_scope: Boolean(lichessToken) && !requiresReauth,
+            requires_reauth: requiresReauth
           },
           200
         );
@@ -430,6 +494,90 @@ async function apiHandler(req, res, customUrl = null) {
           ]
         });
         return sendJson(res, await getFullState(customUrl, userId), 200);
+      }
+
+      if (pathname === "/api/lichess/puzzle/complete") {
+        const lichessId = String(payload.lichessId || payload.id || "").trim();
+        const win = Boolean(payload.win);
+        const rated = payload.rated !== false;
+        const angle = String(payload.angle || "mix").trim() || "mix";
+        if (!lichessId) {
+          return sendJson(res, { error: "lichessId requis" }, 400);
+        }
+        const lichessToken = await getUserLichessToken(client, userId);
+        if (!lichessToken) {
+          return sendJson(res, { ok: true, synced: false, requires_reauth: true }, 200);
+        }
+        const batchUrl = `https://lichess.org/api/puzzle/batch/${encodeURIComponent(angle === "daily" || angle === "all" ? "mix" : angle)}`;
+        const lRes = await fetch(batchUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${lichessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            solutions: [{ id: lichessId, win, rated }]
+          })
+        });
+        let lBody = null;
+        try {
+          lBody = await lRes.json();
+        } catch (_e) {}
+        return sendJson(
+          res,
+          {
+            ok: true,
+            synced: lRes.ok,
+            status: lRes.status,
+            requires_reauth: lRes.status === 401 || lRes.status === 403,
+            lichessResponse: lBody
+          },
+          200
+        );
+      }
+
+      if (pathname === "/api/lichess/puzzle/save") {
+        const lichessId = String(payload.lichessId || "").trim();
+        if (!lichessId || !payload.fen) {
+          return sendJson(res, { error: "lichessId et fen requis pour sauvegarder ce puzzle." }, 400);
+        }
+        const code = `LICHESS-${lichessId}-U${userId}`;
+        const diff = Math.min(5, Math.max(1, Number(payload.diff || 3)));
+        const fsrsDifficulty = Math.min(10, Math.max(1, diff * 1.8));
+        await client.execute({
+          sql: `INSERT OR IGNORE INTO puzzles (
+                  code, title, fen, theme, type, diff, side, solution, solution_moves, hint,
+                  custom, solved, attempts, box, fsrs_difficulty, user_id
+                ) VALUES (?, ?, ?, ?, 'tactique', ?, ?, ?, ?, ?, 1, 0, 0, 1, ?, ?)`,
+          args: [
+            code,
+            payload.title || `Lichess #${lichessId}`,
+            payload.fen,
+            payload.theme || "fork",
+            diff,
+            payload.side || "Blancs",
+            payload.solution || "",
+            JSON.stringify(Array.isArray(payload.solution_moves) ? payload.solution_moves : []),
+            payload.hint || "",
+            fsrsDifficulty,
+            userId
+          ]
+        });
+        const insertedRes = await client.execute({
+          sql: "SELECT id FROM puzzles WHERE code = ? AND user_id = ?",
+          args: [code, userId]
+        });
+        const savedId = insertedRes.rows[0]?.id ? Number(insertedRes.rows[0].id) : null;
+        if (savedId) {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO user_puzzle_progress (user_id, puzzle_id, box, fsrs_difficulty)
+                  VALUES (?, ?, 1, ?)`,
+            args: [userId, savedId, fsrsDifficulty]
+          });
+        }
+        const fullState = await getFullState(customUrl, userId);
+        return sendJson(res, { ...fullState, saved: true, savedPuzzleId: savedId }, 200);
       }
 
       if (pathname === "/api/puzzles/solve") {
