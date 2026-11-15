@@ -243,6 +243,13 @@ async function recalculateStreak(client, userId = 1) {
   return streak;
 }
 
+function buildPreRoundWarmup(puzzles = [], limit = 5) {
+  return (puzzles || [])
+    .filter((p) => Number(p.fsrs_state || 0) >= 2)
+    .sort((a, b) => Number(b.fsrs_stability || 0) - Number(a.fsrs_stability || 0))
+    .slice(0, Math.max(1, Number(limit || 5)));
+}
+
 async function getFullState(customUrl, userId = 1) {
   const client = getDbClient(customUrl);
   const uid = Number(userId) || 1;
@@ -266,7 +273,8 @@ async function getFullState(customUrl, userId = 1) {
     fsrsLogsRes,
     lichessGamesRes,
     opponentsRes,
-    openingRepRes
+    openingRepRes,
+    roundsRes
   ] = await Promise.all([
     client.execute({ sql: "SELECT key, value FROM user_settings WHERE user_id = ?", args: [uid] }),
     client.execute({
@@ -300,7 +308,8 @@ async function getFullState(customUrl, userId = 1) {
     client.execute({ sql: "SELECT * FROM fsrs_review_logs WHERE user_id = ? ORDER BY id DESC LIMIT 100", args: [uid] }),
     client.execute({ sql: "SELECT game_id AS id, white, black, result, speed, played_at, pgn, hour_of_day, opening, critical_fen, critical_move_san, critical_solution_moves, critical_side, critical_move_number, created_at FROM user_lichess_games WHERE user_id = ? ORDER BY played_at DESC, created_at DESC LIMIT 100", args: [uid] }),
     client.execute({ sql: "SELECT * FROM opponents WHERE user_id = ? ORDER BY id DESC", args: [uid] }),
-    client.execute({ sql: "SELECT * FROM opening_repertoire WHERE user_id = ? ORDER BY id ASC", args: [uid] })
+    client.execute({ sql: "SELECT * FROM opening_repertoire WHERE user_id = ? ORDER BY id ASC", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM tournament_rounds WHERE user_id = ? ORDER BY id DESC LIMIT 100", args: [uid] })
   ]);
 
   const settings = userRow ? {} : buildDefaultUserSettings("");
@@ -424,6 +433,8 @@ async function getFullState(customUrl, userId = 1) {
     chronobiologyReport,
     opponents,
     openingRepertoire,
+    rounds: roundsRes.rows || [],
+    preRoundWarmup: buildPreRoundWarmup(puzzles, 5),
     advancedAnalytics,
     logs: logsRes.rows || [],
     contextualJournal: journalRes.rows || [],
@@ -453,5 +464,6 @@ module.exports = {
   initDatabase,
   createBackup,
   recalculateStreak,
+  buildPreRoundWarmup,
   getFullState
 };

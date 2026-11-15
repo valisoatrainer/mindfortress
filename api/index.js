@@ -6,7 +6,7 @@
 const fs = require("fs");
 const { URL } = require("url");
 const { getDbClient, resolveLocalDbFilePath } = require("../db/client");
-const { initDatabase, createBackup, recalculateStreak, getFullState } = require("../db/init");
+const { initDatabase, createBackup, recalculateStreak, buildPreRoundWarmup, getFullState } = require("../db/init");
 const {
   reviewPuzzle,
   autoRateChessPuzzle,
@@ -416,6 +416,13 @@ async function apiHandler(req, res, customUrl = null) {
         );
       }
 
+      if (pathname === "/api/rounds/warmup") {
+        const state = await getFullState(customUrl, userId);
+        const limitParam = Number(parsedUrl.searchParams.get("limit") || 5);
+        const warmup = buildPreRoundWarmup(state.puzzles, limitParam);
+        return sendJson(res, { ok: true, warmup, count: warmup.length }, 200);
+      }
+
       if (pathname === "/api/puzzles/due") {
         const state = await getFullState(customUrl, userId);
         const modeParam = parsedUrl.searchParams.get("mode") || state.settings.training_mode || "fsrs";
@@ -578,6 +585,71 @@ async function apiHandler(req, res, customUrl = null) {
         }
         const fullState = await getFullState(customUrl, userId);
         return sendJson(res, { ...fullState, saved: true, savedPuzzleId: savedId }, 200);
+      }
+
+      if (pathname === "/api/rounds") {
+        const roundNumber = Math.max(1, Number(payload.round_number || 1));
+        const tournamentName = String(payload.tournament_name || "Championnat de Madagascar 2027").trim();
+        const opponentId = payload.opponent_id ? Number(payload.opponent_id) : null;
+        const opponentName = String(payload.opponent_name || "Adversaire").trim();
+        const side = payload.side === "Noirs" ? "Noirs" : "Blancs";
+        const result = ["1", "1/2", "½", "0"].includes(String(payload.result)) ? String(payload.result) : "1";
+        const hadZeitnot = payload.had_zeitnot ? 1 : 0;
+        const criticalMoment = String(payload.critical_moment || "").trim();
+        const emotion = String(payload.emotion || "Calme").trim();
+        const lesson = String(payload.lesson || "").trim();
+        const playedAt = payload.played_at || new Date().toISOString().slice(0, 10);
+
+        await client.execute({
+          sql: `INSERT INTO tournament_rounds (
+                  user_id, tournament_name, round_number, opponent_id, opponent_name,
+                  side, result, had_zeitnot, critical_moment, emotion, lesson, played_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            userId,
+            tournamentName,
+            roundNumber,
+            opponentId,
+            opponentName,
+            side,
+            result,
+            hadZeitnot,
+            criticalMoment,
+            emotion,
+            lesson,
+            playedAt
+          ]
+        });
+
+        if (payload.save_to_journal !== false && (criticalMoment || lesson)) {
+          const noteText = [
+            `[${tournamentName} · Ronde ${roundNumber}]`,
+            `vs ${opponentName} (${side}) · Résultat : ${result}`,
+            hadZeitnot ? "Zeitnot : Oui" : "Zeitnot : Non",
+            criticalMoment ? `Moment critique : ${criticalMoment}` : "",
+            lesson ? `Leçon : ${lesson}` : ""
+          ]
+            .filter(Boolean)
+            .join(" | ");
+
+          await client.execute({
+            sql: `INSERT INTO contextual_journal (
+                    user_id, linked_text, at_label, note, before_emotion, after_emotion,
+                    before_intensity, after_intensity, lieu, bruit, sommeil, fatigue, pression, tag
+                  ) VALUES (?, ?, ?, ?, ?, ?, 3, 2, 'Salle de tournoi', 'Modéré', 'Bon', ?, 'Compétition FIDE', 'ronde')`,
+            args: [
+              userId,
+              `Ronde #${roundNumber} vs ${opponentName} (${result})`,
+              formatNowLabel(),
+              noteText,
+              emotion.toLowerCase(),
+              emotion.toLowerCase(),
+              hadZeitnot ? 4 : 2
+            ]
+          });
+        }
+
+        return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
       if (pathname === "/api/puzzles/solve") {
@@ -1358,6 +1430,11 @@ async function apiHandler(req, res, customUrl = null) {
         } else if (pathname === "/api/openings") {
           await client.execute({
             sql: "DELETE FROM opening_repertoire WHERE id = ? AND user_id = ?",
+            args: [idNum, userId]
+          });
+        } else if (pathname === "/api/rounds") {
+          await client.execute({
+            sql: "DELETE FROM tournament_rounds WHERE id = ? AND user_id = ?",
             args: [idNum, userId]
           });
         }

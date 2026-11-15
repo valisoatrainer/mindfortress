@@ -2689,6 +2689,22 @@ function Oa() {
     }),
     [activeOpponentView, setActiveOpponentView] = $.useState(null),
     [activeOpponentStepIdx, setActiveOpponentStepIdx] = $.useState(0),
+    [tournamentRounds, setTournamentRounds] = $.useState([]),
+    [preRoundWarmup, setPreRoundWarmup] = $.useState([]),
+    [warmupIdx, setWarmupIdx] = $.useState(0),
+    [selectedRoundOppId, setSelectedRoundOppId] = $.useState(""),
+    [newRoundForm, setNewRoundForm] = $.useState({
+      tournament_name: "Championnat de Madagascar 2027",
+      round_number: 1,
+      opponent_name: "",
+      side: "Blancs",
+      result: "1",
+      had_zeitnot: false,
+      critical_moment: "",
+      emotion: "Calme",
+      lesson: "",
+      save_to_journal: true
+    }),
     [C, N] = $.useState([]),
     [W, h] = $.useState([]),
     [s, v] = $.useState({
@@ -2817,6 +2833,8 @@ function Oa() {
     if (st.lichessProfile !== undefined) setLichessProfile(st.lichessProfile);
     if (Array.isArray(st.lichessGames)) setLichessGames(st.lichessGames);
     if (Array.isArray(st.opponents)) setOpponentsList(st.opponents);
+    if (Array.isArray(st.rounds)) setTournamentRounds(st.rounds);
+    if (Array.isArray(st.preRoundWarmup)) setPreRoundWarmup(st.preRoundWarmup);
     try {
       if (sMap.woop_json) Aa(JSON.parse(sMap.woop_json));
     } catch {}
@@ -3061,6 +3079,51 @@ function Oa() {
     }, [Le]),
     Re = rh(new Date()),
     Za = m > 0 ? Math.round((y / m) * 100) : 0;
+
+  async function saveTournamentRound(ev) {
+    if (ev) ev.preventDefault();
+    try {
+      let oppObj = opponentsList.find((o) => String(o.id) === String(selectedRoundOppId));
+      let payload = {
+        ...newRoundForm,
+        opponent_id: oppObj ? oppObj.id : null,
+        opponent_name: newRoundForm.opponent_name.trim() || (oppObj ? oppObj.name : "Adversaire")
+      };
+      let res = await fetch("/api/rounds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      });
+      let data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur sauvegarde ronde");
+      applyServerState(data);
+      setNewRoundForm((prev) => ({
+        ...prev,
+        round_number: Number(prev.round_number || 1) + 1,
+        opponent_name: "",
+        critical_moment: "",
+        lesson: ""
+      }));
+      Ze(`🏆 Ronde #${payload.round_number} enregistrée !`);
+    } catch (err) {
+      Ze(`⚠️ ${err.message || "Erreur lors de l'enregistrement de la ronde"}`);
+    }
+  }
+
+  async function deleteTournamentRound(roundId) {
+    try {
+      let res = await fetch(`/api/rounds?id=${encodeURIComponent(roundId)}`, {
+        method: "DELETE",
+        credentials: "same-origin"
+      });
+      let data = await res.json();
+      if (res.ok) {
+        applyServerState(data);
+        Ze("Ronde supprimée.");
+      }
+    } catch (_e) {}
+  }
 
   async function fetchNextLichessStreamPuzzle(angleOverride = null, diffOverride = null) {
     let ang = angleOverride !== null ? angleOverride : lichessStreamAngle;
@@ -4500,6 +4563,7 @@ function Oa() {
       { k: "progress", label: "Progression", icon: Yr },
       { k: "journal", label: "Journal Contextuel", icon: Ge },
       { k: "lichess", label: "Lichess", icon: zn },
+      { k: "ronde", label: "Jour de Ronde", icon: Or },
       { k: "methode", label: "Méthode & 2027", icon: CompassIcon }
     ];
 
@@ -7953,6 +8017,361 @@ function Oa() {
                     })
                   ]
                 }),
+
+              // ==================== TAB : JOUR DE RONDE (ÉTAPE 10) ====================
+              t === "ronde" &&
+                (() => {
+                  let activeRoundOpp = opponentsList.find((o) => String(o.id) === String(selectedRoundOppId)) || null;
+                  let activeWarmupPuzzle =
+                    preRoundWarmup.length > 0 ? preRoundWarmup[warmupIdx % preRoundWarmup.length] : null;
+                  let totalPoints = tournamentRounds.reduce(
+                    (acc, r) => acc + (r.result === "1" ? 1 : r.result === "1/2" || r.result === "½" ? 0.5 : 0),
+                    0
+                  );
+                  return d("div", {
+                    className: "space-y-6",
+                    children: [
+                      d("div", {
+                        className: "flex flex-wrap items-center justify-between gap-3",
+                        children: [
+                          d("div", {
+                            children: [
+                              f("p", {
+                                className: "text-[#FFD700] text-xs font-bold tracking-[.18em]",
+                                children: "PROTOCOLE COMPÉTITION FIDE"
+                              }),
+                              f("h1", { className: "text-3xl font-extrabold", children: "🏆 Mode Jour de Ronde" }),
+                              f("p", {
+                                className: "text-sm text-[#A7A9BE]",
+                                children: "Routine Pré-Ronde (15 min confiance + fiche adversaire) & Débriefing Post-Ronde (5 min)."
+                              })
+                            ]
+                          }),
+                          d("div", {
+                            className: "bg-[#12121C] border border-[#FFD700]/40 rounded-2xl px-4 py-2 text-right",
+                            children: [
+                              f("p", { className: "text-[11px] text-[#A7A9BE]", children: "Score tournoi cumulé" }),
+                              f("p", {
+                                className: "mono text-xl font-extrabold text-[#FFD700]",
+                                children: `${totalPoints} / ${tournamentRounds.length}`
+                              })
+                            ]
+                          })
+                        ]
+                      }),
+
+                      // 1. ROUTINE PRÉ-RONDE (15 MIN)
+                      d("section", {
+                        className: "bg-[#12121C] border border-[#5B8CFF]/40 rounded-3xl p-4 sm:p-5 space-y-4",
+                        children: [
+                          d("div", {
+                            className: "flex flex-wrap items-center justify-between gap-2",
+                            children: [
+                              f("h2", {
+                                className: "text-lg font-extrabold text-[#AFC6FF]",
+                                children: "⚡ 1. Routine Pré-Ronde (15 min) — Confiance & Calme"
+                              }),
+                              f("span", {
+                                className: "text-xs px-3 py-1 rounded-full bg-[#5B8CFF]/15 border border-[#5B8CFF]/30 text-[#AFC6FF] font-bold",
+                                children: "Respiration 4–6 · 0 fatigue"
+                              })
+                            ]
+                          }),
+                          d("div", {
+                            className: "grid md:grid-cols-2 gap-4",
+                            children: [
+                              // Fiche adversaire du jour
+                              d("div", {
+                                className: "bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-4 space-y-3",
+                                children: [
+                                  f("label", {
+                                    className: "block text-xs font-bold text-[#FFD700]",
+                                    children: "🎯 Adversaire du jour (issu de Scouting)"
+                                  }),
+                                  d("select", {
+                                    value: selectedRoundOppId,
+                                    onChange: (ev) => {
+                                      let val = ev.target.value;
+                                      setSelectedRoundOppId(val);
+                                      let found = opponentsList.find((o) => String(o.id) === String(val));
+                                      if (found) {
+                                        setNewRoundForm((prev) => ({ ...prev, opponent_name: found.name }));
+                                      }
+                                    },
+                                    className: "w-full bg-[#12121C] border border-[#26263A] rounded-xl px-3 py-2 text-sm text-white",
+                                    children: [
+                                      f("option", { value: "", children: "— Choisir un adversaire enregistré —" }),
+                                      ...opponentsList.map((opp) =>
+                                        f(
+                                          "option",
+                                          { value: String(opp.id), children: `${opp.name}${opp.fide_elo ? ` (${opp.fide_elo})` : ""} · ${opp.style || "Solide"}` },
+                                          opp.id
+                                        )
+                                      )
+                                    ]
+                                  }),
+                                  activeRoundOpp
+                                    ? d("div", {
+                                        className: "text-xs space-y-1.5 text-[#C9CAD9] border-t border-[#26263A] pt-3",
+                                        children: [
+                                          f("p", { children: `Style : ${activeRoundOpp.style || "—"} · Elo FIDE : ${activeRoundOpp.fide_elo || "—"}` }),
+                                          activeRoundOpp.white_repertoire && f("p", { children: `Blancs : ${activeRoundOpp.white_repertoire}` }),
+                                          activeRoundOpp.black_repertoire && f("p", { children: `Noirs : ${activeRoundOpp.black_repertoire}` }),
+                                          activeRoundOpp.match_plan &&
+                                            f("p", { className: "text-[#FFD700] font-semibold", children: `Plan de match : ${activeRoundOpp.match_plan}` })
+                                        ]
+                                      })
+                                    : f("p", {
+                                        className: "text-xs text-[#A7A9BE]",
+                                        children: "Ajoute tes adversaires dans l'onglet Lichess → Scouting pour afficher leur plan de match ici."
+                                      })
+                                ]
+                              }),
+
+                              // Échauffement de confiance (puzzles maîtrisés uniquement)
+                              d("div", {
+                                className: "bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-4 space-y-3",
+                                children: [
+                                  d("div", {
+                                    className: "flex items-center justify-between gap-2",
+                                    children: [
+                                      f("span", {
+                                        className: "text-xs font-bold text-emerald-300",
+                                        children: `🧠 Échauffement Confiance (${preRoundWarmup.length} puzzles maîtrisés)`
+                                      }),
+                                      preRoundWarmup.length > 1 &&
+                                        f("button", {
+                                          type: "button",
+                                          onClick: () => setWarmupIdx((i) => (i + 1) % preRoundWarmup.length),
+                                          className: "text-xs px-2.5 py-1 rounded-full bg-[#181826] border border-[#26263A] font-bold hover:border-[#5B8CFF]",
+                                          children: "Suivant →"
+                                        })
+                                    ]
+                                  }),
+                                  activeWarmupPuzzle
+                                    ? d("div", {
+                                        className: "space-y-2",
+                                        children: [
+                                          f("p", {
+                                            className: "text-xs text-[#C9CAD9]",
+                                            children: `${activeWarmupPuzzle.code || ""} · ${activeWarmupPuzzle.title} (${activeWarmupPuzzle.side || "Blancs"})`
+                                          }),
+                                          f(Gd, {
+                                            fen: activeWarmupPuzzle.fen,
+                                            puzzle: activeWarmupPuzzle,
+                                            compact: true,
+                                            interactive: true,
+                                            onSolved: () => Ze(`✅ Échauffement réussi : ${activeWarmupPuzzle.title} !`)
+                                          })
+                                        ]
+                                      })
+                                    : f("p", {
+                                        className: "text-xs text-[#A7A9BE]",
+                                        children: "Aucun puzzle maîtrisé (FSRS Review) pour l'instant. Résous d'abord quelques puzzles en mode FSRS pour débloquer ton échauffement pré-ronde !"
+                                      })
+                                ]
+                              })
+                            ]
+                          })
+                        ]
+                      }),
+
+                      // 2. DÉBRIEFING POST-RONDE (5 MIN)
+                      d("section", {
+                        className: "bg-[#12121C] border border-[#26263A] rounded-3xl p-4 sm:p-5 space-y-4",
+                        children: [
+                          f("h2", {
+                            className: "text-lg font-extrabold text-[#FFD700]",
+                            children: "📝 2. Débriefing Post-Ronde (5 min)"
+                          }),
+                          d("form", {
+                            onSubmit: saveTournamentRound,
+                            className: "grid sm:grid-cols-2 lg:grid-cols-3 gap-3",
+                            children: [
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Tournoi" }),
+                                  f("input", {
+                                    value: newRoundForm.tournament_name,
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, tournament_name: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm"
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Ronde #" }),
+                                  f("input", {
+                                    type: "number",
+                                    min: 1,
+                                    value: newRoundForm.round_number,
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, round_number: Number(ev.target.value || 1) })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm"
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Adversaire" }),
+                                  f("input", {
+                                    value: newRoundForm.opponent_name,
+                                    placeholder: "Nom ou pseudo",
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, opponent_name: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm"
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Couleur" }),
+                                  d("select", {
+                                    value: newRoundForm.side,
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, side: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm",
+                                    children: [
+                                      f("option", { value: "Blancs", children: "♔ Blancs" }),
+                                      f("option", { value: "Noirs", children: "♚ Noirs" })
+                                    ]
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Résultat" }),
+                                  d("select", {
+                                    value: newRoundForm.result,
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, result: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm",
+                                    children: [
+                                      f("option", { value: "1", children: "1 — Victoire" }),
+                                      f("option", { value: "1/2", children: "½ — Nulle" }),
+                                      f("option", { value: "0", children: "0 — Défaite" })
+                                    ]
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "État émotionnel" }),
+                                  d("select", {
+                                    value: newRoundForm.emotion,
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, emotion: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm",
+                                    children: ["Calme", "Focus", "Stress", "Confiant", "Fatigué", "Tilt"].map((em) =>
+                                      f("option", { value: em, children: em }, em)
+                                    )
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                className: "sm:col-span-2 lg:col-span-3",
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Moment critique de la partie" }),
+                                  f("input", {
+                                    value: newRoundForm.critical_moment,
+                                    placeholder: "Ex: 28...f5 raté en zeitnot, oubli de la menace sur g7…",
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, critical_moment: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm"
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                className: "sm:col-span-2 lg:col-span-3",
+                                children: [
+                                  f("label", { className: "block text-xs text-[#A7A9BE] mb-1", children: "Leçon à retenir" }),
+                                  f("input", {
+                                    value: newRoundForm.lesson,
+                                    placeholder: "Ex: Vérifier systématiquement les échecs intermédiaires avant de capturer.",
+                                    onChange: (ev) => setNewRoundForm((p) => ({ ...p, lesson: ev.target.value })),
+                                    className: "w-full bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-sm"
+                                  })
+                                ]
+                              }),
+                              d("div", {
+                                className: "sm:col-span-2 lg:col-span-3 flex flex-wrap items-center justify-between gap-3 pt-1",
+                                children: [
+                                  d("div", {
+                                    className: "flex flex-wrap items-center gap-4 text-xs",
+                                    children: [
+                                      d("label", {
+                                        className: "flex items-center gap-2 cursor-pointer",
+                                        children: [
+                                          f("input", {
+                                            type: "checkbox",
+                                            checked: newRoundForm.had_zeitnot,
+                                            onChange: (ev) => setNewRoundForm((p) => ({ ...p, had_zeitnot: ev.target.checked }))
+                                          }),
+                                          "⏱️ Zeitnot subi (< 5 min)"
+                                        ]
+                                      }),
+                                      d("label", {
+                                        className: "flex items-center gap-2 cursor-pointer",
+                                        children: [
+                                          f("input", {
+                                            type: "checkbox",
+                                            checked: newRoundForm.save_to_journal,
+                                            onChange: (ev) => setNewRoundForm((p) => ({ ...p, save_to_journal: ev.target.checked }))
+                                          }),
+                                          "📓 Lier au Journal Contextuel"
+                                        ]
+                                      })
+                                    ]
+                                  }),
+                                  f("button", {
+                                    type: "submit",
+                                    className: "px-5 py-2.5 rounded-full bg-[#FFD700] text-black text-xs font-extrabold hover:opacity-90",
+                                    children: "💾 Enregistrer la ronde"
+                                  })
+                                ]
+                              })
+                            ]
+                          })
+                        ]
+                      }),
+
+                      // 3. HISTORIQUE DES RONDES
+                      d("section", {
+                        className: "bg-[#12121C] border border-[#26263A] rounded-3xl p-4 sm:p-5 space-y-3",
+                        children: [
+                          f("h2", { className: "text-base font-extrabold", children: `📜 Historique des rondes (${tournamentRounds.length})` }),
+                          tournamentRounds.length === 0
+                            ? f("p", { className: "text-xs text-[#A7A9BE]", children: "Aucune ronde enregistrée pour le moment." })
+                            : d("div", {
+                                className: "space-y-2",
+                                children: tournamentRounds.map((r) =>
+                                  d("div", {
+                                    key: r.id,
+                                    className: "bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3",
+                                    children: [
+                                      d("div", {
+                                        className: "space-y-0.5",
+                                        children: [
+                                          f("p", {
+                                            className: "text-sm font-bold",
+                                            children: `Ronde ${r.round_number} · ${r.tournament_name} — vs ${r.opponent_name || "Adversaire"} (${r.side})`
+                                          }),
+                                          f("p", {
+                                            className: "text-xs text-[#A7A9BE]",
+                                            children: `Résultat : ${r.result} · Émotion : ${r.emotion}${r.had_zeitnot ? " · ⏱️ Zeitnot" : ""}${r.critical_moment ? ` · ${r.critical_moment}` : ""}`
+                                          }),
+                                          r.lesson && f("p", { className: "text-xs text-[#AFC6FF]", children: `💡 ${r.lesson}` })
+                                        ]
+                                      }),
+                                      f("button", {
+                                        type: "button",
+                                        onClick: () => deleteTournamentRound(r.id),
+                                        className: "text-xs px-3 py-1 rounded-full border border-red-500/30 text-red-300 hover:bg-red-500/10",
+                                        children: "Supprimer"
+                                      })
+                                    ]
+                                  })
+                                )
+                              })
+                        ]
+                      })
+                    ]
+                  });
+                })(),
 
               // ==================== TAB 6 : MÉTHODE & PRÉPA 2027 ====================
               t === "methode" &&

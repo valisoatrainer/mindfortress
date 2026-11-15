@@ -251,3 +251,22 @@ CREATE TABLE IF NOT EXISTS opening_repertoire (
     fsrs_due_date TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS tournament_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    tournament_name TEXT DEFAULT 'Championnat de Madagascar 2027',
+    round_number INTEGER NOT NULL DEFAULT 1,
+    opponent_id INTEGER,
+    opponent_name TEXT DEFAULT '',
+    side TEXT NOT NULL DEFAULT 'Blancs',
+    result TEXT NOT NULL DEFAULT '1',
+    had_zeitnot INTEGER NOT NULL DEFAULT 0,
+    critical_moment TEXT DEFAULT '',
+    emotion TEXT DEFAULT 'Calme',
+    lesson TEXT DEFAULT '',
+    played_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rounds_user ON tournament_rounds(user_id);
