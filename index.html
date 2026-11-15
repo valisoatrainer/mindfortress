@@ -4386,15 +4386,33 @@ function Oa() {
 
   if (authStatus === "checking") {
     return d("div", {
-      className: "min-h-screen bg-[var(--bg)] text-[var(--text)] grid place-items-center p-6",
+      style: {
+        minHeight: "100vh",
+        background: "var(--bg, #0A0A0F)",
+        color: "var(--text, #F5F5F7)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px"
+      },
       children: d("div", {
-        className: "text-center space-y-3",
+        style: { textAlign: "center" },
         children: [
           f("div", {
-            className: "w-14 h-14 mx-auto rounded-2xl bg-[#FFD700] text-black grid place-items-center font-black text-2xl shadow-[0_0_25px_rgba(255,215,0,.35)]",
-            children: f(Xr, { size: 28 })
+            style: {
+              width: "56px",
+              height: "56px",
+              margin: "0 auto 14px",
+              borderRadius: "16px",
+              background: "#FFD700",
+              color: "#0A0A0F",
+              display: "grid",
+              placeItems: "center",
+              boxShadow: "0 0 24px rgba(255,215,0,0.3)"
+            },
+            children: f(Xr, { size: 26 })
           }),
-          f("p", { className: "text-sm text-[#A7A9BE]", children: "Vérification de votre session Lichess..." })
+          f("p", { style: { fontSize: "14px", color: "#A7A9BE" }, children: "Vérification de votre session Lichess..." })
         ]
       })
     });
@@ -4402,44 +4420,125 @@ function Oa() {
 
   if (authStatus !== "authenticated") {
     return d("div", {
-      className: "min-h-screen bg-[var(--bg)] text-[var(--text)] grid place-items-center p-4 sm:p-6",
+      style: {
+        minHeight: "100vh",
+        background: "radial-gradient(circle at top, rgba(91,140,255,0.14), transparent 55%), var(--bg, #0A0A0F)",
+        color: "var(--text, #F5F5F7)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px"
+      },
       children: d("div", {
-        className: "w-full max-w-[460px] bg-[#12121C] border border-[#26263A] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 text-center",
+        style: {
+          width: "100%",
+          maxWidth: "430px",
+          background: "#12121C",
+          border: "1px solid #26263A",
+          borderRadius: "24px",
+          padding: "36px 30px",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.65)",
+          textAlign: "center"
+        },
         children: [
           f("div", {
-            className: "w-16 h-16 mx-auto rounded-2xl bg-[#FFD700] text-black grid place-items-center font-black text-2xl shadow-[0_0_28px_rgba(255,215,0,.35)]",
-            children: f(Xr, { size: 32 })
+            style: {
+              width: "60px",
+              height: "60px",
+              margin: "0 auto 20px",
+              borderRadius: "18px",
+              background: "#FFD700",
+              color: "#0A0A0F",
+              display: "grid",
+              placeItems: "center",
+              boxShadow: "0 0 28px rgba(255,215,0,0.28)"
+            },
+            children: f(Xr, { size: 30 })
           }),
-          d("div", {
-            className: "space-y-1.5",
-            children: [
-              f("p", {
-                className: "text-[11px] font-bold tracking-[.18em] text-[#5B8CFF]",
-                children: "PRÉPARATION CHAMPIONNAT DE MADAGASCAR 2027"
-              }),
-              d("h1", {
-                className: "text-2xl sm:text-3xl font-extrabold tracking-tight",
-                children: ["MIND ", f("span", { className: "text-[#5B8CFF]", children: "FORTRESS" })]
-              }),
-              f("p", {
-                className: "text-xs sm:text-sm text-[#A7A9BE] pt-1",
-                children: "Connexion Lichess obligatoire. Chaque joueur dispose de son propre espace isolé (FSRS, Woodpecker, Chrono FIDE, Scouting Adversaires & Journal Mental)."
-              })
-            ]
+          f("p", {
+            style: {
+              fontSize: "11px",
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "#5B8CFF",
+              marginBottom: "8px"
+            },
+            children: "CHAMPIONNAT DE MADAGASCAR 2027"
+          }),
+          d("h1", {
+            style: {
+              fontSize: "28px",
+              fontWeight: 800,
+              letterSpacing: "-0.02em",
+              marginBottom: "10px"
+            },
+            children: ["MIND ", f("span", { style: { color: "#5B8CFF" }, children: "FORTRESS" })]
+          }),
+          f("p", {
+            style: {
+              fontSize: "13px",
+              lineHeight: "1.6",
+              color: "#A7A9BE",
+              marginBottom: "24px"
+            },
+            children: "Connectez votre compte Lichess pour accéder à votre préparation personnelle (FSRS, Woodpecker, Chrono FIDE, Scouting & Journal Mental)."
           }),
           authError &&
             f("div", {
-              className: "text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-2xl p-3 text-left",
+              style: {
+                fontSize: "12px",
+                color: "#FCA5A5",
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: "14px",
+                padding: "12px 14px",
+                marginBottom: "18px",
+                textAlign: "left"
+              },
               children: authError
             }),
-          f("a", {
+          d("a", {
             href: "/api/auth/lichess/login",
-            className: "w-full py-3.5 px-5 rounded-full bg-[#FFD700] text-black font-extrabold text-sm flex items-center justify-center gap-2 hover:opacity-95 shadow-[0_0_24px_rgba(255,215,0,.28)] transition",
-            children: "♞ Se connecter avec Lichess"
+            style: {
+              width: "100%",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              padding: "13px 20px",
+              borderRadius: "14px",
+              background: "#FFFFFF",
+              color: "#161512",
+              fontWeight: 700,
+              fontSize: "15px",
+              textDecoration: "none",
+              boxShadow: "0 4px 18px rgba(255,255,255,0.12)",
+              boxSizing: "border-box"
+            },
+            children: [
+              f("svg", {
+                xmlns: "http://www.w3.org/2000/svg",
+                viewBox: "0 0 50 50",
+                width: 22,
+                height: 22,
+                style: { flexShrink: 0, display: "block" },
+                children: f("path", {
+                  fill: "#161512",
+                  stroke: "#161512",
+                  strokeLinejoin: "round",
+                  d: "M38.956.5c-3.53.418-6.452.902-9.286 2.984C5.534 1.786-.692 18.533.68 29.364 3.493 50.214 31.918 55.785 41.329 41.7c-7.444 7.696-19.276 8.752-28.323 3.084S-.506 27.392 4.683 17.567C9.873 7.742 18.996 4.535 29.03 6.405c2.43-1.418 5.225-3.22 7.655-3.187l-1.694 4.86 12.752 21.37c-.439 5.654-5.459 6.112-5.459 6.112-.574-1.47-1.634-2.942-4.842-6.036-3.207-3.094-17.465-10.177-15.788-16.207-2.001 6.967 10.311 14.152 14.04 17.663 3.73 3.51 5.426 6.04 5.795 6.756 0 0 9.392-2.504 7.838-8.927L37.4 7.171z"
+                })
+              }),
+              f("span", { children: "Se connecter avec Lichess" })
+            ]
           }),
           f("p", {
-            className: "text-[11px] text-[#7E8299]",
-            children: "Authentification officielle OAuth 2.0 PKCE via lichess.org · Aucun mot de passe stocké."
+            style: {
+              fontSize: "11px",
+              color: "#7E8299",
+              marginTop: "18px"
+            },
+            children: "OAuth 2.0 PKCE officiel via lichess.org · Aucun mot de passe stocké"
           })
         ]
       })
@@ -5260,15 +5359,33 @@ function Oa() {
                                         let det = candidateValidation.details && candidateValidation.details[cIdx];
                                         if (authStatus === "checking") {
     return d("div", {
-      className: "min-h-screen bg-[var(--bg)] text-[var(--text)] grid place-items-center p-6",
+      style: {
+        minHeight: "100vh",
+        background: "var(--bg, #0A0A0F)",
+        color: "var(--text, #F5F5F7)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px"
+      },
       children: d("div", {
-        className: "text-center space-y-3",
+        style: { textAlign: "center" },
         children: [
           f("div", {
-            className: "w-14 h-14 mx-auto rounded-2xl bg-[#FFD700] text-black grid place-items-center font-black text-2xl shadow-[0_0_25px_rgba(255,215,0,.35)]",
-            children: f(Xr, { size: 28 })
+            style: {
+              width: "56px",
+              height: "56px",
+              margin: "0 auto 14px",
+              borderRadius: "16px",
+              background: "#FFD700",
+              color: "#0A0A0F",
+              display: "grid",
+              placeItems: "center",
+              boxShadow: "0 0 24px rgba(255,215,0,0.3)"
+            },
+            children: f(Xr, { size: 26 })
           }),
-          f("p", { className: "text-sm text-[#A7A9BE]", children: "Vérification de votre session Lichess..." })
+          f("p", { style: { fontSize: "14px", color: "#A7A9BE" }, children: "Vérification de votre session Lichess..." })
         ]
       })
     });
@@ -5276,44 +5393,125 @@ function Oa() {
 
   if (authStatus !== "authenticated") {
     return d("div", {
-      className: "min-h-screen bg-[var(--bg)] text-[var(--text)] grid place-items-center p-4 sm:p-6",
+      style: {
+        minHeight: "100vh",
+        background: "radial-gradient(circle at top, rgba(91,140,255,0.14), transparent 55%), var(--bg, #0A0A0F)",
+        color: "var(--text, #F5F5F7)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px"
+      },
       children: d("div", {
-        className: "w-full max-w-[460px] bg-[#12121C] border border-[#26263A] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 text-center",
+        style: {
+          width: "100%",
+          maxWidth: "430px",
+          background: "#12121C",
+          border: "1px solid #26263A",
+          borderRadius: "24px",
+          padding: "36px 30px",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.65)",
+          textAlign: "center"
+        },
         children: [
           f("div", {
-            className: "w-16 h-16 mx-auto rounded-2xl bg-[#FFD700] text-black grid place-items-center font-black text-2xl shadow-[0_0_28px_rgba(255,215,0,.35)]",
-            children: f(Xr, { size: 32 })
+            style: {
+              width: "60px",
+              height: "60px",
+              margin: "0 auto 20px",
+              borderRadius: "18px",
+              background: "#FFD700",
+              color: "#0A0A0F",
+              display: "grid",
+              placeItems: "center",
+              boxShadow: "0 0 28px rgba(255,215,0,0.28)"
+            },
+            children: f(Xr, { size: 30 })
           }),
-          d("div", {
-            className: "space-y-1.5",
-            children: [
-              f("p", {
-                className: "text-[11px] font-bold tracking-[.18em] text-[#5B8CFF]",
-                children: "PRÉPARATION CHAMPIONNAT DE MADAGASCAR 2027"
-              }),
-              d("h1", {
-                className: "text-2xl sm:text-3xl font-extrabold tracking-tight",
-                children: ["MIND ", f("span", { className: "text-[#5B8CFF]", children: "FORTRESS" })]
-              }),
-              f("p", {
-                className: "text-xs sm:text-sm text-[#A7A9BE] pt-1",
-                children: "Connexion Lichess obligatoire. Chaque joueur dispose de son propre espace isolé (FSRS, Woodpecker, Chrono FIDE, Scouting Adversaires & Journal Mental)."
-              })
-            ]
+          f("p", {
+            style: {
+              fontSize: "11px",
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "#5B8CFF",
+              marginBottom: "8px"
+            },
+            children: "CHAMPIONNAT DE MADAGASCAR 2027"
+          }),
+          d("h1", {
+            style: {
+              fontSize: "28px",
+              fontWeight: 800,
+              letterSpacing: "-0.02em",
+              marginBottom: "10px"
+            },
+            children: ["MIND ", f("span", { style: { color: "#5B8CFF" }, children: "FORTRESS" })]
+          }),
+          f("p", {
+            style: {
+              fontSize: "13px",
+              lineHeight: "1.6",
+              color: "#A7A9BE",
+              marginBottom: "24px"
+            },
+            children: "Connectez votre compte Lichess pour accéder à votre préparation personnelle (FSRS, Woodpecker, Chrono FIDE, Scouting & Journal Mental)."
           }),
           authError &&
             f("div", {
-              className: "text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-2xl p-3 text-left",
+              style: {
+                fontSize: "12px",
+                color: "#FCA5A5",
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: "14px",
+                padding: "12px 14px",
+                marginBottom: "18px",
+                textAlign: "left"
+              },
               children: authError
             }),
-          f("a", {
+          d("a", {
             href: "/api/auth/lichess/login",
-            className: "w-full py-3.5 px-5 rounded-full bg-[#FFD700] text-black font-extrabold text-sm flex items-center justify-center gap-2 hover:opacity-95 shadow-[0_0_24px_rgba(255,215,0,.28)] transition",
-            children: "♞ Se connecter avec Lichess"
+            style: {
+              width: "100%",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              padding: "13px 20px",
+              borderRadius: "14px",
+              background: "#FFFFFF",
+              color: "#161512",
+              fontWeight: 700,
+              fontSize: "15px",
+              textDecoration: "none",
+              boxShadow: "0 4px 18px rgba(255,255,255,0.12)",
+              boxSizing: "border-box"
+            },
+            children: [
+              f("svg", {
+                xmlns: "http://www.w3.org/2000/svg",
+                viewBox: "0 0 50 50",
+                width: 22,
+                height: 22,
+                style: { flexShrink: 0, display: "block" },
+                children: f("path", {
+                  fill: "#161512",
+                  stroke: "#161512",
+                  strokeLinejoin: "round",
+                  d: "M38.956.5c-3.53.418-6.452.902-9.286 2.984C5.534 1.786-.692 18.533.68 29.364 3.493 50.214 31.918 55.785 41.329 41.7c-7.444 7.696-19.276 8.752-28.323 3.084S-.506 27.392 4.683 17.567C9.873 7.742 18.996 4.535 29.03 6.405c2.43-1.418 5.225-3.22 7.655-3.187l-1.694 4.86 12.752 21.37c-.439 5.654-5.459 6.112-5.459 6.112-.574-1.47-1.634-2.942-4.842-6.036-3.207-3.094-17.465-10.177-15.788-16.207-2.001 6.967 10.311 14.152 14.04 17.663 3.73 3.51 5.426 6.04 5.795 6.756 0 0 9.392-2.504 7.838-8.927L37.4 7.171z"
+                })
+              }),
+              f("span", { children: "Se connecter avec Lichess" })
+            ]
           }),
           f("p", {
-            className: "text-[11px] text-[#7E8299]",
-            children: "Authentification officielle OAuth 2.0 PKCE via lichess.org · Aucun mot de passe stocké."
+            style: {
+              fontSize: "11px",
+              color: "#7E8299",
+              marginTop: "18px"
+            },
+            children: "OAuth 2.0 PKCE officiel via lichess.org · Aucun mot de passe stocké"
           })
         ]
       })
