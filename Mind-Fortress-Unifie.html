@@ -2263,7 +2263,7 @@ function Gd({
       if (nextIdx >= expectedMoves.length || chess.isCheckmate()) {
         solvedDoneRef.current = true;
         setStatusKind("success");
-        setStatusMsg(`🏆 Résolu sur ValisoaChess (${chess.history().join(" ")}) !`);
+        setStatusMsg(`🏆 Résolu (${chess.history().join(" ")}) !`);
         if (onSolvedRef.current) {
           let mistake = hadMistakeRef.current;
           setTimeout(() => onSolvedRef.current(mistake), 200);
@@ -2699,7 +2699,7 @@ function Oa() {
       tag: ""
     }),
     [k, T] = $.useState(null),
-    [O, D] = $.useState("Base SQLite active — toutes tes notes, puzzles et séances sont sauvegardés."),
+    [O, D] = $.useState("Ton espace personnel est prêt — toutes tes notes, puzzles et séances sont enregistrés automatiquement."),
     [z, I] = $.useState("all"),
     [Q, ge] = $.useState("all"),
     [Bt, $a] = $.useState(""),
@@ -2920,7 +2920,7 @@ function Oa() {
             if (st.user) setAuthUser(st.user);
             setAuthStatus("authenticated");
             applyServerState(st);
-            xn("SQLite Natif (@libsql/client · Turso Ready) connecté à mind_fortress.db.");
+            xn("Espace personnel synchronisé.");
           }
           return;
         }
@@ -3321,8 +3321,8 @@ function Oa() {
       add_min: Ce[e].minutes
     });
 
-    xn(`${o} enregistré dans SQLite. +${xpVal} XP · visible dans Progression.`);
-    Ze(`${o} validé · +${xpVal} XP sauvegardé dans SQLite !`);
+    xn(`${o} enregistré (+${xpVal} XP) · visible dans Progression.`);
+    Ze(`${o} validé · +${xpVal} XP enregistré !`);
   }
 
   async function Ja(o, isSuccess = true, customSec = null, customNotes = "", explicitRating = null) {
@@ -4538,7 +4538,7 @@ function Oa() {
               color: "#7E8299",
               marginTop: "18px"
             },
-            children: "OAuth 2.0 PKCE officiel via lichess.org · Aucun mot de passe stocké"
+            children: "Connexion sécurisée via lichess.org · Aucun mot de passe requis"
           })
         ]
       })
@@ -4596,19 +4596,6 @@ function Oa() {
                       })
                     ]
                   }),
-                d("button", {
-                  onClick: triggerManualBackup,
-                  title: "Cliquer pour créer une sauvegarde SQLite (.db)",
-                  className: "hidden lg:flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-full bg-[#181826] border border-[#26263A] text-[#C9CAD9] hover:border-[#5B8CFF]",
-                  children: [
-                    f("span", {
-                      className: `w-2 h-2 rounded-full ${sqlMode === "sqlite_native" ? "bg-emerald-400" : "bg-[#FFD700]"}`
-                    }),
-                    f(DbIcon, { size: 13, className: "text-[#5B8CFF]" }),
-                    sqlMode === "sqlite_native" ? "SQLite Natif · mind_fortress.db" : "SQLite Local · Export .db",
-                    f("span", { className: "text-[10px] px-1.5 py-0.5 rounded bg-[#5B8CFF]/20 text-[#AFC6FF] font-bold ml-1", children: "Backup" })
-                  ]
-                }),
                 f("div", {
                   className: "flex bg-[#181826] border border-[#26263A] rounded-full p-1",
                   role: "group",
@@ -4618,7 +4605,7 @@ function Oa() {
                       onClick: () => {
                         n(o);
                         syncSettingsToServer({ level: o });
-                        Ze(`Niveau ${Ce[o].label} choisi — sauvegardé dans SQLite.`);
+                        Ze(`Niveau ${Ce[o].label} choisi — enregistré.`);
                       },
                       "aria-pressed": e === o,
                       className: `px-2.5 sm:px-4 py-2 rounded-full text-[11px] sm:text-xs font-bold transition ${
@@ -4730,12 +4717,11 @@ function Oa() {
                 children: [
                   d("span", {
                     className: "text-[#A7A9BE] flex items-center gap-1.5",
-                    children: [f(DbIcon, { size: 14, className: "text-[#FFD700]" }), "Base SQLite"]
+                    children: [f("span", { className: "w-2 h-2 rounded-full bg-emerald-400" }), "Espace personnel"]
                   }),
-                  d("button", {
-                    onClick: exportSqliteDbFile,
-                    className: "px-2.5 py-1 rounded-full bg-[#181826] border border-[#3A3A58] text-white font-bold hover:border-[#FFD700]",
-                    children: "Télécharger .db"
+                  f("span", {
+                    className: "text-emerald-300 font-bold",
+                    children: "Synchronisé"
                   })
                 ]
               }),
@@ -5511,7 +5497,7 @@ function Oa() {
               color: "#7E8299",
               marginTop: "18px"
             },
-            children: "OAuth 2.0 PKCE officiel via lichess.org · Aucun mot de passe stocké"
+            children: "Connexion sécurisée via lichess.org · Aucun mot de passe requis"
           })
         ]
       })
@@ -5886,7 +5872,7 @@ function Oa() {
                             }),
                             d("h1", {
                               className: "text-3xl font-extrabold mt-1",
-                              children: [ti.length, " puzzles dans ta base SQLite"]
+                              children: [ti.length, " puzzles dans ta bibliothèque"]
                             }),
                             f("p", {
                               className: "text-sm text-[#A7A9BE]",
@@ -6122,7 +6108,7 @@ function Oa() {
                       children: [
                         d("h2", {
                           className: "font-bold flex gap-2 items-center",
-                          children: [f(el, {}), " Ajouter ton puzzle perso dans SQLite"]
+                          children: [f(el, {}), " Ajouter un puzzle perso"]
                         }),
                         d("div", {
                           className: "grid md:grid-cols-[minmax(0,260px)_1fr] gap-5 mt-4 items-start",
@@ -6253,7 +6239,7 @@ function Oa() {
                         f("button", {
                           onClick: yp,
                           className: "mt-4 px-6 py-3 rounded-full bg-[#5B8CFF] font-extrabold text-sm",
-                          children: "Ajouter à ma bibliothèque SQLite"
+                          children: "Ajouter à ma bibliothèque"
                         })
                       ]
                     })
@@ -6465,7 +6451,7 @@ function Oa() {
                               children: [
                                 f("p", {
                                   className: "text-[11px] font-extrabold tracking-[.16em] text-[#5B8CFF]",
-                                  children: "ANALYTIQUE COGNITIVE CROISÉE · SQLITE NATIF & TURSO"
+                                  children: "ANALYTIQUE COGNITIVE CROISÉE · SOMMEIL, FATIGUE & ÉMOTIONS"
                                 }),
                                 f("h2", {
                                   className: "font-extrabold text-lg mt-0.5",
@@ -6756,33 +6742,23 @@ function Oa() {
                           children: [
                             d("h2", {
                               className: "font-bold flex items-center gap-2",
-                              children: [f(DbIcon, { size: 18, className: "text-[#FFD700]" }), " Base de Données SQLite & Sauvegardes"]
+                              children: [f(DbIcon, { size: 18, className: "text-[#FFD700]" }), " Mes Données & Export"]
                             }),
                             d("span", {
-                              className: "mono text-xs px-3 py-1 rounded-full bg-[#181826] border border-[#26263A] text-[#AFC6FF]",
-                              children: dbPathLabel
+                              className: "text-xs px-3 py-1 rounded-full bg-[#181826] border border-emerald-500/30 text-emerald-300",
+                              children: "🟢 Sauvegarde cloud active"
                             })
                           ]
                         }),
                         f("p", {
                           className: "text-sm text-[#A7A9BE] mt-1",
                           children:
-                            "Toutes tes données (niveau, XP, série, 67+ puzzles, boîtes Woodpecker, logs, Journal Contextuel, WOOP, répertoire) sont stockées dans SQLite. Tu peux télécharger le fichier binaire mind_fortress.db, créer un backup dans backups/, ou exporter/importer en JSON."
+                            "Toute ta progression (niveau, XP, série, puzzles, séances, journal, répertoire et adversaires) est enregistrée automatiquement sur ton compte Lichess. Tu peux aussi exporter ou importer une copie JSON."
                         }),
                         f("p", { className: "text-xs mt-2 text-[#FFD700]", children: ap }),
                         d("div", {
                           className: "flex flex-wrap gap-2 mt-4",
                           children: [
-                            d("button", {
-                              onClick: exportSqliteDbFile,
-                              className: "px-5 py-3 rounded-full bg-[#FFD700] text-black font-extrabold text-sm flex gap-2 items-center",
-                              children: [f(DbIcon, { size: 16 }), " Télécharger mind_fortress.db (SQLite)"]
-                            }),
-                            d("button", {
-                              onClick: triggerManualBackup,
-                              className: "px-5 py-3 rounded-full bg-[#181826] border border-[#FFD700]/40 text-[#FFD700] font-bold text-sm flex gap-2 items-center",
-                              children: [f(nl, { size: 16 }), " Créer Backup SQLite (backups/)"]
-                            }),
                             d("button", {
                               onClick: qa,
                               className: "px-5 py-3 rounded-full bg-white text-black font-bold text-sm flex gap-2 items-center",
@@ -6797,37 +6773,20 @@ function Oa() {
                             d("button", {
                               onClick: () => ni(true),
                               className: "px-5 py-3 rounded-full border border-red-500/40 text-red-300 font-bold text-sm flex gap-2 items-center",
-                              children: [f(Ht, { size: 16 }), " Effacer"]
+                              children: [f(Ht, { size: 16 }), " Réinitialiser"]
                             })
                           ]
                         }),
-                        backupsList.length > 0 &&
-                          d("div", {
-                            className: "mt-4 bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-3.5",
-                            children: [
-                              f("p", { className: "text-xs font-bold text-[#A7A9BE]", children: "Sauvegardes SQLite automatiques & manuelles dans backups/ :" }),
-                              f("div", {
-                                className: "flex flex-wrap gap-1.5 mt-2",
-                                children: backupsList.map((bf) =>
-                                  f("span", {
-                                    key: bf,
-                                    className: "mono text-[11px] px-2.5 py-1 rounded-full bg-[#12121C] border border-[#26263A] text-[#C9CAD9]",
-                                    children: bf
-                                  }, bf)
-                                )
-                              })
-                            ]
-                          }),
                         cp &&
                           d("div", {
                             className: "mt-4 bg-[#0A0A0F] border border-red-500/40 rounded-2xl p-4",
                             role: "dialog",
-                            "aria-label": "Confirmer l’effacement",
+                            "aria-label": "Confirmer la réinitialisation",
                             children: [
-                              f("p", { className: "font-bold text-sm", children: "Effacer toute la session ?" }),
+                              f("p", { className: "font-bold text-sm", children: "Réinitialiser toute ta préparation ?" }),
                               f("p", {
                                 className: "text-sm text-[#A7A9BE] mt-1",
-                                children: "Un backup SQLite de sécurité sera créé automatiquement dans backups/ avant la remise à zéro."
+                                children: "Toutes tes statistiques, puzzles résolus, séances et notes personnelles seront remis à zéro."
                               }),
                               d("div", {
                                 className: "flex flex-wrap gap-2 mt-3",
@@ -6860,7 +6819,7 @@ function Oa() {
                       children: [
                         f("p", {
                           className: "text-[#FFD700] text-xs font-bold tracking-[.18em]",
-                          children: "MIND FORTRESS · MÉMOIRE DU MOMENT (SQLITE)"
+                          children: "MIND FORTRESS · MÉMOIRE DU MOMENT"
                         }),
                         f("h1", { className: "text-3xl font-extrabold mt-1", children: "Journal Contextuel" }),
                         f("p", {
@@ -6875,7 +6834,7 @@ function Oa() {
                       children: [
                         f("span", {
                           className: "px-2.5 py-1.5 rounded-full bg-[#FFD700]/10 border border-[#FFD700]/30 text-[#FFD700] font-bold",
-                          children: "Persisté dans SQLite"
+                          children: "Enregistré automatiquement"
                         }),
                         f("span", { className: "text-[#A7A9BE]", children: O }),
                         d("button", {
@@ -7205,7 +7164,7 @@ function Oa() {
                             f("h1", { className: "text-3xl font-extrabold mt-1", children: "Lichess Lab & Chronobiologie" }),
                             f("p", {
                               className: "text-sm text-[#A7A9BE]",
-                              children: "Synchronise ton profil et tes parties dans SQLite (lichess_games), convertis tes gaffes en Puzzles FSRS et identifie tes heures de lucidité maximale."
+                              children: "Synchronise ton profil et tes parties Lichess, convertis tes gaffes en puzzles d'entraînement et identifie tes heures de lucidité maximale."
                             })
                           ]
                         }),
@@ -7218,17 +7177,17 @@ function Oa() {
                               className: "px-4 py-2.5 rounded-full bg-[#5B8CFF] text-white text-xs font-extrabold hover:opacity-90",
                               children: lichessSyncBusy
                                 ? "🔄 Synchronisation en cours..."
-                                : "🔄 Synchroniser mes parties Lichess (SQLite)"
+                                : "🔄 Synchroniser mes parties Lichess"
                             }),
                             d("button", {
                               onClick: fetchDailyLichessPuzzle,
                               className: "px-4 py-2.5 rounded-full bg-[#181826] border border-[#3A3A58] text-xs font-bold hover:border-[#FFD700]",
-                              children: "📡 Charger Daily Puzzle Lichess (API)"
+                              children: "📡 Charger Daily Puzzle Lichess"
                             }),
                             d("button", {
                               onClick: () => setLichessModalOpen(true),
                               className: "px-5 py-2.5 rounded-full bg-[#FFD700] text-black text-xs font-extrabold",
-                              children: "+ Log Session Lichess (SQLite)"
+                              children: "+ Enregistrer une session Lichess"
                             })
                           ]
                         })
@@ -7270,7 +7229,7 @@ function Oa() {
                       children: [
                         d("div", {
                           children: [
-                            f("label", { className: "text-sm font-bold", htmlFor: "pseudo", children: "Pseudo Lichess (persisté dans SQLite)" }),
+                            f("label", { className: "text-sm font-bold", htmlFor: "pseudo", children: "Pseudo Lichess" }),
                             d("div", {
                               className: "flex flex-col sm:flex-row gap-2 mt-2",
                               children: [
@@ -7497,7 +7456,7 @@ function Oa() {
                                 f("button", {
                                   onClick: addLichessUrlToPuzzles,
                                   className: "px-4 py-2.5 rounded-full bg-[#181826] border border-[#3A3A58] font-bold text-xs hover:border-[#FFD700]",
-                                  children: "+ Sauvegarder dans Puzzles SQLite"
+                                  children: "+ Sauvegarder dans mes Puzzles"
                                 })
                               ]
                             }),
@@ -7537,7 +7496,7 @@ function Oa() {
                                 f("button", {
                                   onClick: () => syncLichessGamesAndProfile(hl),
                                   className: "px-4 py-2.5 rounded-full bg-[#5B8CFF] text-white font-bold text-xs",
-                                  children: "💾 Synchroniser dans lichess_games (SQLite)"
+                                  children: "💾 Synchroniser mes parties Lichess"
                                 }),
                                 f("button", {
                                   onClick: () => {
@@ -8018,12 +7977,12 @@ function Oa() {
                               children: [
                                 f("p", {
                                   className: "text-[11px] font-extrabold tracking-[.16em] text-[#5B8CFF]",
-                                  children: "TABLE SQLITE OPENING_REPERTOIRE · FSRS & VALISOACHESSBOARD"
+                                  children: "RÉPERTOIRE D'OUVERTURES · RÉVISION ESPACÉE FSRS"
                                 }),
                                 f("h2", { className: "font-bold text-lg mt-0.5", children: "Répertoire d’Ouvertures Interactif · Spécifique Madagascar 2027" }),
                                 f("p", {
                                   className: "text-xs text-[#A7A9BE] mt-0.5",
-                                  children: "Chaque ligne est validée par ValisoaChessLite, jouable coup par coup sur ValisoaChessboard et planifiée avec l'algorithme FSRS."
+                                  children: "Chaque ligne est validée automatiquement, jouable coup par coup sur l'échiquier et planifiée en répétition espacée (FSRS)."
                                 })
                               ]
                             }),
@@ -8301,7 +8260,7 @@ function Oa() {
                                 }),
                                 f("h2", {
                                   className: "font-extrabold text-lg mt-0.5",
-                                  children: "Scouting Adversaires Madagascar 2027 (Table SQLite opponents)"
+                                  children: "Scouting Adversaires Madagascar 2027"
                                 }),
                                 f("p", {
                                   className: "text-xs text-[#A7A9BE] mt-0.5",
@@ -8489,7 +8448,7 @@ function Oa() {
                                         f("button", {
                                           onClick: () => openOpponentPgnOnBoard(opp),
                                           className: "px-3 py-1.5 rounded-xl bg-[#5B8CFF] text-white text-xs font-bold hover:opacity-90",
-                                          children: "👁️ Voir PGN sur ValisoaChessboard"
+                                          children: "👁️ Rejouer la partie sur l'échiquier"
                                         }),
                                         f("button", {
                                           onClick: () => deleteOpponentFromSqlite(opp.id),
@@ -8590,7 +8549,7 @@ function Oa() {
                                 f("button", {
                                   onClick: saveOpponentToSqlite,
                                   className: "px-5 py-2.5 rounded-xl bg-[#FFD700] text-black font-extrabold text-xs whitespace-nowrap",
-                                  children: "+ Enregistrer Adversaire (SQLite)"
+                                  children: "+ Enregistrer l'adversaire"
                                 })
                               ]
                             })
@@ -8849,7 +8808,7 @@ function Oa() {
                         increment_attempts: true
                       });
                       setLichessModalOpen(false);
-                      Ze("Session Lichess enregistrée dans SQLite !");
+                      Ze("Session Lichess enregistrée !");
                     },
                     className: "flex-1 py-2.5 rounded-full bg-[#5B8CFF] text-white text-xs font-extrabold",
                     children: "Enregistrer · +25 XP"
