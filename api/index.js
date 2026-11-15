@@ -652,6 +652,21 @@ async function apiHandler(req, res, customUrl = null) {
         return sendJson(res, await getFullState(customUrl, userId), 200);
       }
 
+      if (pathname === "/api/visualization/session") {
+        const drillType = String(payload.drill_type || "square_color").trim();
+        const score = Math.max(0, Number(payload.score || 0));
+        const total = Math.max(1, Number(payload.total || 10));
+        const avgTimeMs = Math.max(0, Math.round(Number(payload.avg_time_ms || 0)));
+
+        await client.execute({
+          sql: `INSERT INTO visualization_sessions (user_id, drill_type, score, total, avg_time_ms)
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [userId, drillType, score, total, avgTimeMs]
+        });
+
+        return sendJson(res, await getFullState(customUrl, userId), 200);
+      }
+
       if (pathname === "/api/puzzles/solve") {
         const pid = Number(payload.id);
         const success = payload.success !== false ? 1 : 0;

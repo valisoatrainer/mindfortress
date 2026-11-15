@@ -274,7 +274,8 @@ async function getFullState(customUrl, userId = 1) {
     lichessGamesRes,
     opponentsRes,
     openingRepRes,
-    roundsRes
+    roundsRes,
+    visRes
   ] = await Promise.all([
     client.execute({ sql: "SELECT key, value FROM user_settings WHERE user_id = ?", args: [uid] }),
     client.execute({
@@ -309,7 +310,8 @@ async function getFullState(customUrl, userId = 1) {
     client.execute({ sql: "SELECT game_id AS id, white, black, result, speed, played_at, pgn, hour_of_day, opening, critical_fen, critical_move_san, critical_solution_moves, critical_side, critical_move_number, created_at FROM user_lichess_games WHERE user_id = ? ORDER BY played_at DESC, created_at DESC LIMIT 100", args: [uid] }),
     client.execute({ sql: "SELECT * FROM opponents WHERE user_id = ? ORDER BY id DESC", args: [uid] }),
     client.execute({ sql: "SELECT * FROM opening_repertoire WHERE user_id = ? ORDER BY id ASC", args: [uid] }),
-    client.execute({ sql: "SELECT * FROM tournament_rounds WHERE user_id = ? ORDER BY id DESC LIMIT 100", args: [uid] })
+    client.execute({ sql: "SELECT * FROM tournament_rounds WHERE user_id = ? ORDER BY id DESC LIMIT 100", args: [uid] }),
+    client.execute({ sql: "SELECT * FROM visualization_sessions WHERE user_id = ? ORDER BY id DESC LIMIT 50", args: [uid] })
   ]);
 
   const settings = userRow ? {} : buildDefaultUserSettings("");
@@ -435,6 +437,7 @@ async function getFullState(customUrl, userId = 1) {
     openingRepertoire,
     rounds: roundsRes.rows || [],
     preRoundWarmup: buildPreRoundWarmup(puzzles, 5),
+    visualizationSessions: visRes.rows || [],
     advancedAnalytics,
     logs: logsRes.rows || [],
     contextualJournal: journalRes.rows || [],

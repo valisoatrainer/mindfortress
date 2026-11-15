@@ -1959,6 +1959,7 @@ input:focus,textarea:focus,select:focus{
 <script src="vendor/ValisoaLichess.js"></script>
 <script src="vendor/ValisoaScoutingOpenings.js"></script>
 <script src="vendor/ValisoaAnalytics.js"></script>
+<script src="vendor/ValisoaVisualization.js"></script>
 
 </head>
 <body>
@@ -2693,6 +2694,15 @@ function Oa() {
     [preRoundWarmup, setPreRoundWarmup] = $.useState([]),
     [warmupIdx, setWarmupIdx] = $.useState(0),
     [selectedRoundOppId, setSelectedRoundOppId] = $.useState(""),
+    [visSessions, setVisSessions] = $.useState([]),
+    [visMode, setVisMode] = $.useState("square_color"),
+    [visDrill, setVisDrill] = $.useState(null),
+    [visStep, setVisStep] = $.useState(0),
+    [visScore, setVisScore] = $.useState(0),
+    [visTimes, setVisTimes] = $.useState([]),
+    [visStartTs, setVisStartTs] = $.useState(0),
+    [visFeedback, setVisFeedback] = $.useState(""),
+    [visBlindIdx, setVisBlindIdx] = $.useState(0),
     [newRoundForm, setNewRoundForm] = $.useState({
       tournament_name: "Championnat de Madagascar 2027",
       round_number: 1,
@@ -2835,6 +2845,7 @@ function Oa() {
     if (Array.isArray(st.opponents)) setOpponentsList(st.opponents);
     if (Array.isArray(st.rounds)) setTournamentRounds(st.rounds);
     if (Array.isArray(st.preRoundWarmup)) setPreRoundWarmup(st.preRoundWarmup);
+    if (Array.isArray(st.visualizationSessions)) setVisSessions(st.visualizationSessions);
     try {
       if (sMap.woop_json) Aa(JSON.parse(sMap.woop_json));
     } catch {}
@@ -3079,6 +3090,80 @@ function Oa() {
     }, [Le]),
     Re = rh(new Date()),
     Za = m > 0 ? Math.round((y / m) * 100) : 0;
+
+  function startVisSeries(mode) {
+    if (!window.ValisoaVisualization) return;
+    setVisMode(mode);
+    setVisStep(0);
+    setVisScore(0);
+    setVisTimes([]);
+    setVisFeedback("");
+    if (mode === "square_color") {
+      setVisDrill(window.ValisoaVisualization.generateSquareColorDrill());
+      setVisStartTs(Date.now());
+    } else if (mode === "knight_path") {
+      setVisDrill(window.ValisoaVisualization.generateKnightPathDrill());
+      setVisStartTs(Date.now());
+    } else {
+      setVisDrill(null);
+    }
+  }
+
+  async function saveVisSessionToServer(drillType, score, total, avgTimeMs) {
+    try {
+      let res = await fetch("/api/visualization/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          drill_type: drillType,
+          score,
+          total,
+          avg_time_ms: avgTimeMs
+        })
+      });
+      let data = await res.json();
+      if (res.ok) applyServerState(data);
+    } catch (_e) {}
+  }
+
+  function answerVisDrill(userAns) {
+    if (!visDrill || !window.ValisoaVisualization) return;
+    let elapsed = Math.max(100, Date.now() - (visStartTs || Date.now()));
+    let totalTarget = visMode === "square_color" ? 10 : 5;
+    let isCorrect = String(userAns) === String(visDrill.answer);
+    let nextScore = visScore + (isCorrect ? 1 : 0);
+    let nextTimes = [...visTimes, elapsed];
+    let nextStep = visStep + 1;
+
+    setVisScore(nextScore);
+    setVisTimes(nextTimes);
+    setVisFeedback(
+      visMode === "square_color"
+        ? isCorrect
+          ? `✅ ${visDrill.square} est bien ${visDrill.answer === "light" ? "Blanche" : "Noire"} (${elapsed} ms)`
+          : `❌ ${visDrill.square} est ${visDrill.answer === "light" ? "Blanche" : "Noire"}`
+        : isCorrect
+        ? `✅ Exact ! ${visDrill.answer} coups (${visDrill.path.join(" → ")})`
+        : `❌ Réponse : ${visDrill.answer} coups (${visDrill.path.join(" → ")})`
+    );
+
+    if (nextStep >= totalTarget) {
+      let avgMs = Math.round(nextTimes.reduce((a, b) => a + b, 0) / nextTimes.length);
+      setVisDrill(null);
+      setVisStep(nextStep);
+      saveVisSessionToServer(visMode, nextScore, totalTarget, avgMs);
+      Ze(`🧠 Série terminée : ${nextScore}/${totalTarget} (${avgMs} ms/rep)`);
+    } else {
+      setVisStep(nextStep);
+      setVisDrill(
+        visMode === "square_color"
+          ? window.ValisoaVisualization.generateSquareColorDrill()
+          : window.ValisoaVisualization.generateKnightPathDrill()
+      );
+      setVisStartTs(Date.now());
+    }
+  }
 
   async function saveTournamentRound(ev) {
     if (ev) ev.preventDefault();
@@ -6541,6 +6626,197 @@ function Oa() {
                           className: "mt-4 px-6 py-3 rounded-full bg-[#5B8CFF] font-extrabold text-sm",
                           children: "Ajouter à ma bibliothèque"
                         })
+                      ]
+                    }),
+
+                    // ==================== VISUALISATION & CALCUL À L'AVEUGLE (ÉTAPE 11) ====================
+                    d("section", {
+                      className: "bg-[#12121C] border border-[#5B8CFF]/40 rounded-3xl p-4 sm:p-5 space-y-4",
+                      children: [
+                        d("div", {
+                          className: "flex flex-wrap items-center justify-between gap-2",
+                          children: [
+                            d("div", {
+                              children: [
+                                f("h2", {
+                                  className: "text-lg font-extrabold text-[#AFC6FF]",
+                                  children: "🧠 Visualisation & Calcul à l'Aveugle (Étape 11)"
+                                }),
+                                f("p", {
+                                  className: "text-xs text-[#A7A9BE]",
+                                  children: "Entraîne ta vision mentale sans échiquier visible pour la 4e heure de partie FIDE."
+                                })
+                              ]
+                            }),
+                            d("div", {
+                              className: "flex flex-wrap gap-2",
+                              children: [
+                                f("button", {
+                                  type: "button",
+                                  onClick: () => startVisSeries("square_color"),
+                                  className: `px-3 py-1.5 rounded-full text-xs font-bold border ${
+                                    visMode === "square_color" ? "bg-[#5B8CFF] text-white border-[#5B8CFF]" : "bg-[#0A0A0F] border-[#26263A] text-[#C9CAD9]"
+                                  }`,
+                                  children: "🎨 Couleur de case (10)"
+                                }),
+                                f("button", {
+                                  type: "button",
+                                  onClick: () => startVisSeries("knight_path"),
+                                  className: `px-3 py-1.5 rounded-full text-xs font-bold border ${
+                                    visMode === "knight_path" ? "bg-[#FFD700] text-black border-[#FFD700]" : "bg-[#0A0A0F] border-[#26263A] text-[#C9CAD9]"
+                                  }`,
+                                  children: "♞ Trajet Cavalier (5)"
+                                }),
+                                f("button", {
+                                  type: "button",
+                                  onClick: () => startVisSeries("blindfold_short"),
+                                  className: `px-3 py-1.5 rounded-full text-xs font-bold border ${
+                                    visMode === "blindfold_short" ? "bg-emerald-400 text-black border-emerald-400" : "bg-[#0A0A0F] border-[#26263A] text-[#C9CAD9]"
+                                  }`,
+                                  children: "👁️ Série Aveugle Courte"
+                                })
+                              ]
+                            })
+                          ]
+                        }),
+
+                        visMode !== "blindfold_short" &&
+                          d("div", {
+                            className: "bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-4 space-y-3",
+                            children: [
+                              visDrill
+                                ? d("div", {
+                                    className: "space-y-3 text-center",
+                                    children: [
+                                      f("p", {
+                                        className: "text-xs text-[#A7A9BE]",
+                                        children: `Question ${visStep + 1} / ${visMode === "square_color" ? 10 : 5} · Score : ${visScore}`
+                                      }),
+                                      visMode === "square_color"
+                                        ? d("div", {
+                                            className: "space-y-3",
+                                            children: [
+                                              f("p", { className: "mono text-4xl font-extrabold text-[#FFD700]", children: visDrill.square }),
+                                              d("div", {
+                                                className: "flex justify-center gap-3",
+                                                children: [
+                                                  f("button", {
+                                                    type: "button",
+                                                    onClick: () => answerVisDrill("light"),
+                                                    className: "px-6 py-3 rounded-2xl bg-white text-black font-extrabold text-sm",
+                                                    children: "⬜ Case Blanche"
+                                                  }),
+                                                  f("button", {
+                                                    type: "button",
+                                                    onClick: () => answerVisDrill("dark"),
+                                                    className: "px-6 py-3 rounded-2xl bg-[#181826] border border-[#3A3A58] text-white font-extrabold text-sm",
+                                                    children: "⬛ Case Noire"
+                                                  })
+                                                ]
+                                              })
+                                            ]
+                                          })
+                                        : d("div", {
+                                            className: "space-y-3",
+                                            children: [
+                                              f("p", {
+                                                className: "mono text-2xl font-extrabold text-[#FFD700]",
+                                                children: `♞ ${visDrill.startSq} → ${visDrill.targetSq}`
+                                              }),
+                                              f("p", { className: "text-xs text-[#A7A9BE]", children: "Combien de coups minimum ?" }),
+                                              d("div", {
+                                                className: "flex flex-wrap justify-center gap-2",
+                                                children: [1, 2, 3, 4, 5, 6].map((n) =>
+                                                  f(
+                                                    "button",
+                                                    {
+                                                      type: "button",
+                                                      onClick: () => answerVisDrill(n),
+                                                      className: "w-11 h-11 rounded-xl bg-[#181826] border border-[#3A3A58] font-extrabold text-sm hover:border-[#FFD700]",
+                                                      children: String(n)
+                                                    },
+                                                    n
+                                                  )
+                                                )
+                                              })
+                                            ]
+                                          })
+                                    ]
+                                  })
+                                : d("div", {
+                                    className: "text-center space-y-2 py-2",
+                                    children: [
+                                      f("p", {
+                                        className: "text-sm text-[#C9CAD9]",
+                                        children:
+                                          visStep > 0
+                                            ? `Dernière série : ${visScore} / ${visMode === "square_color" ? 10 : 5}`
+                                            : "Clique sur un mode ci-dessus pour démarrer une série chronométrée sans échiquier."
+                                      }),
+                                      f("button", {
+                                        type: "button",
+                                        onClick: () => startVisSeries(visMode),
+                                        className: "px-5 py-2 rounded-full bg-[#5B8CFF] text-white text-xs font-extrabold",
+                                        children: "▶ Démarrer la série"
+                                      })
+                                    ]
+                                  }),
+                              visFeedback && f("p", { className: "text-xs text-center text-[#AFC6FF]", children: visFeedback })
+                            ]
+                          }),
+
+                        visMode === "blindfold_short" &&
+                          (() => {
+                            let shortList = ti.filter((p) => Number(p.diff || 2) <= 2);
+                            let bp = shortList[visBlindIdx % Math.max(1, shortList.length)] || ti[0];
+                            return d("div", {
+                              className: "bg-[#0A0A0F] border border-[#26263A] rounded-2xl p-4 space-y-3",
+                              children: [
+                                d("div", {
+                                  className: "flex flex-wrap items-center justify-between gap-2",
+                                  children: [
+                                    f("span", {
+                                      className: "text-xs font-bold text-emerald-300",
+                                      children: `👁️ Aveugle court : ${bp.code || ""} · ${bp.title} (${bp.side || "Blancs"})`
+                                    }),
+                                    f("button", {
+                                      type: "button",
+                                      onClick: () => setVisBlindIdx((i) => i + 1),
+                                      className: "text-xs px-3 py-1 rounded-full bg-[#181826] border border-[#26263A] font-bold",
+                                      children: "Suivant →"
+                                    })
+                                  ]
+                                }),
+                                f("p", { className: "mono text-xs text-[#A7A9BE] break-all", children: `FEN : ${bp.fen}` }),
+                                f(Gd, {
+                                  fen: bp.fen,
+                                  puzzle: bp,
+                                  blindfold: true,
+                                  compact: true,
+                                  interactive: true,
+                                  onSolved: (hadMistake) => {
+                                    saveVisSessionToServer("blindfold_short", hadMistake ? 0 : 1, 1, 0);
+                                    Ze(hadMistake ? "Résolu avec erreur." : "🏆 Puzzle à l'aveugle réussi !");
+                                  }
+                                })
+                              ]
+                            });
+                          })(),
+
+                        visSessions.length > 0 &&
+                          d("div", {
+                            className: "text-xs text-[#A7A9BE] flex flex-wrap gap-2 pt-1",
+                            children: visSessions.slice(0, 5).map((vs) =>
+                              f(
+                                "span",
+                                {
+                                  className: "px-2.5 py-1 rounded-full bg-[#0A0A0F] border border-[#26263A]",
+                                  children: `${vs.drill_type === "square_color" ? "🎨" : vs.drill_type === "knight_path" ? "♞" : "👁️"} ${vs.score}/${vs.total}${vs.avg_time_ms ? ` · ${vs.avg_time_ms}ms` : ""}`
+                                },
+                                vs.id
+                              )
+                            )
+                          })
                       ]
                     })
                   ]
