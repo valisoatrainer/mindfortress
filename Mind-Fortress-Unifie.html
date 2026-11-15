@@ -4663,6 +4663,7 @@ function Oa() {
                       }),
                       d("span", {
                         className: "mono text-[11px] px-2 py-0.5 rounded-full bg-[#FFD700]/10 border border-[#FFD700]/30 text-[#FFD700] font-bold",
+                        style: { whiteSpace: "nowrap" },
                         children: ["J-", Re.daysLeft]
                       })
                     ]
@@ -4670,10 +4671,10 @@ function Oa() {
                   f("div", {
                     className: "mt-4 space-y-0 relative pl-5 before:absolute before:left-[7px] before:top-2 before:bottom-2 before:w-px before:bg-[#2A2A42]",
                     children: [
-                      ["Fondation", "Nov 26 → Fév 27", Re.name === "Fondation" || Re.name === "Pré-Fondation"],
-                      ["Construction", "Mars → Mai 27", Re.name === "Construction"],
-                      ["Spécifique", "Juin → Août 27", Re.name === "Spécifique"],
-                      ["Pic", "Sept 27 · Championnat", Re.name.includes("Pic")]
+                      ["Fondation", "Nov 2026 → Fév 2027", Re.name === "Fondation" || Re.name === "Pré-Fondation"],
+                      ["Construction", "Mars → Mai 2027", Re.name === "Construction"],
+                      ["Spécifique", "Juin → Août 2027", Re.name === "Spécifique"],
+                      ["Pic", "Sept 2027 · Championnat", Re.name.includes("Pic")]
                     ].map(([o, S, R]) =>
                       d("div", {
                         className: "relative pb-4 last:pb-0",
