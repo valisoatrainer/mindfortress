@@ -416,6 +416,37 @@ async function apiHandler(req, res, customUrl = null) {
         );
       }
 
+      if (pathname === "/api/club/leaderboard") {
+        const resRows = await client.execute({
+          sql: `SELECT
+                  u.username AS username,
+                  COALESCE(CAST(us_streak.value AS INTEGER), 0) AS streak,
+                  (
+                    SELECT COUNT(*)
+                    FROM fsrs_review_logs frl
+                    WHERE frl.user_id = u.id
+                      AND frl.rating >= 2
+                      AND frl.reviewed_at >= datetime('now', '-7 days')
+                  ) AS weekly_puzzles
+                FROM users u
+                INNER JOIN user_settings us_share
+                  ON us_share.user_id = u.id
+                 AND us_share.key = 'share_club_stats'
+                 AND us_share.value = 'true'
+                LEFT JOIN user_settings us_streak
+                  ON us_streak.user_id = u.id
+                 AND us_streak.key = 'streak'
+                ORDER BY weekly_puzzles DESC, streak DESC, u.username ASC`,
+          args: []
+        });
+        const leaderboard = (resRows.rows || []).map((r) => ({
+          username: String(r.username || ""),
+          streak: Number(r.streak || 0),
+          weekly_puzzles: Number(r.weekly_puzzles || 0)
+        }));
+        return sendJson(res, { ok: true, leaderboard }, 200);
+      }
+
       if (pathname === "/api/rounds/warmup") {
         const state = await getFullState(customUrl, userId);
         const limitParam = Number(parsedUrl.searchParams.get("limit") || 5);

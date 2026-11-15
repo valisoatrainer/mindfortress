@@ -198,6 +198,7 @@ function buildDefaultUserSettings(username = "") {
     training_mode: "fsrs",
     woodpecker_cycle: "1",
     fsrs_request_retention: "0.90",
+    share_club_stats: "false",
     endurance_sessions_json: JSON.stringify([]),
     lichess_profile_json: JSON.stringify(null)
   };
