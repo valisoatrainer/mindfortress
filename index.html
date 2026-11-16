@@ -1994,6 +1994,14 @@ var CompassIcon = E("Compass", [
   ["circle", { cx: "12", cy: "12", r: "10", key: "cp1" }],
   ["polygon", { points: "16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76", key: "cp2" }]
 ]);
+var RondeIcon = E("Trophy", [
+  ["path", { d: "M6 9H4.5a2.5 2.5 0 0 1 0-5H6", key: "rn1" }],
+  ["path", { d: "M18 9h1.5a2.5 2.5 0 0 0 0-5H18", key: "rn2" }],
+  ["path", { d: "M4 22h16", key: "rn3" }],
+  ["path", { d: "M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22", key: "rn4" }],
+  ["path", { d: "M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22", key: "rn5" }],
+  ["path", { d: "M18 2H6v7a6 6 0 0 0 12 0V2Z", key: "rn6" }]
+]);
 
 var ol = ["Calme", "Focus", "Stress", "Frustré", "Confiant", "Fatigué", "Tilt", "Fier", "Vide"],
   Jn = {
@@ -4727,7 +4735,7 @@ function Oa() {
       { k: "progress", label: "Progression", icon: Yr },
       { k: "journal", label: "Journal Contextuel", icon: Ge },
       { k: "lichess", label: "Lichess", icon: zn },
-      { k: "ronde", label: "Jour de Ronde", icon: Or },
+      { k: "ronde", label: "Jour de Ronde", icon: RondeIcon },
       { k: "methode", label: "Méthode & 2027", icon: CompassIcon }
     ];
 
@@ -7517,15 +7525,16 @@ function Oa() {
                                 d(
                                   "div",
                                   {
-                                    className: "flex items-center justify-between bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-xs"
+                                    className: "flex items-center justify-between bg-[#0A0A0F] border border-[#26263A] rounded-xl px-3 py-2 text-xs",
+                                    children: [
+                                      f("span", { className: "font-bold text-white", children: `#${idx + 1} · ${row.username}` }),
+                                      f("span", {
+                                        className: "mono text-[#FFD700]",
+                                        children: `🔥 ${row.streak}j · 🧩 ${row.weekly_puzzles} cette semaine`
+                                      })
+                                    ]
                                   },
-                                  [
-                                    f("span", { className: "font-bold text-white", children: `#${idx + 1} · ${row.username}` }),
-                                    f("span", {
-                                      className: "mono text-[#FFD700]",
-                                      children: `🔥 ${row.streak}j · 🧩 ${row.weekly_puzzles} cette semaine`
-                                    })
-                                  ]
+                                  row.username || idx
                                 )
                               )
                             })
@@ -8434,24 +8443,25 @@ function Oa() {
                                         children:
                                           sfBlundersByGame[gItem.id].length === 0
                                             ? f("p", { className: "text-[11px] text-emerald-300", children: "✅ Aucune gaffe > 150 cp détectée." })
-                                            : sfBlundersByGame[gItem.id].slice(0, 4).map((bl) =>
+                                            : sfBlundersByGame[gItem.id].slice(0, 4).map((bl, bIdx) =>
                                                 d(
                                                   "div",
                                                   {
-                                                    className: "flex flex-wrap items-center justify-between gap-2 bg-[#12121C] border border-red-500/30 rounded-xl px-2.5 py-1.5 text-[11px]"
+                                                    className: "flex flex-wrap items-center justify-between gap-2 bg-[#12121C] border border-red-500/30 rounded-xl px-2.5 py-1.5 text-[11px]",
+                                                    children: [
+                                                      f("span", {
+                                                        className: "text-[#C9CAD9]",
+                                                        children: `Coup ${bl.moveNumber} (${bl.side}) : ${bl.playedSan} → Meilleur : ${bl.bestMoveSan} (-${bl.evalDropCp} cp)`
+                                                      }),
+                                                      f("button", {
+                                                        type: "button",
+                                                        onClick: () => saveStockfishBlunderToFsrs(gItem, bl),
+                                                        className: "px-2.5 py-1 rounded-lg bg-[#FFD700] text-black font-extrabold",
+                                                        children: "+ Puzzle FSRS"
+                                                      })
+                                                    ]
                                                   },
-                                                  [
-                                                    f("span", {
-                                                      className: "text-[#C9CAD9]",
-                                                      children: `Coup ${bl.moveNumber} (${bl.side}) : ${bl.playedSan} → Meilleur : ${bl.bestMoveSan} (-${bl.evalDropCp} cp)`
-                                                    }),
-                                                    f("button", {
-                                                      type: "button",
-                                                      onClick: () => saveStockfishBlunderToFsrs(gItem, bl),
-                                                      className: "px-2.5 py-1 rounded-lg bg-[#FFD700] text-black font-extrabold",
-                                                      children: "+ Puzzle FSRS"
-                                                    })
-                                                  ]
+                                                  `${bl.ply || bIdx}`
                                                 )
                                               )
                                       })
