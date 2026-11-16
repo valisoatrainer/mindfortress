@@ -2822,7 +2822,19 @@ function Oa() {
     [ap, ei] = $.useState("Sauvegarde cloud active."),
     [fp, xn] = $.useState("SQLite Natif (@libsql/client · Turso Ready) connecté · Prêt pour ta première séance."),
     [ml, Xa] = $.useState(""),
-    [cp, ni] = $.useState(false);
+    [cp, ni] = $.useState(false),
+    [pwaInstallPrompt, setPwaInstallPrompt] = $.useState(null),
+    [pwaInstalled, setPwaInstalled] = $.useState(
+      () =>
+        typeof window !== "undefined" &&
+        (window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator?.standalone === true)
+    ),
+    [isIosBrowser, setIsIosBrowser] = $.useState(
+      () =>
+        typeof navigator !== "undefined" &&
+        /iphone|ipad|ipod/i.test(navigator.userAgent || "") &&
+        !window.navigator?.standalone
+    );
 
   function Ze(o) {
     Xa(o);
@@ -2833,6 +2845,39 @@ function Oa() {
     let o = setTimeout(() => Xa(""), 3200);
     return () => clearTimeout(o);
   }, [ml]);
+
+  $.useEffect(() => {
+    function onBeforeInstall(e) {
+      e.preventDefault();
+      setPwaInstallPrompt(e);
+    }
+    function onAppInstalled() {
+      setPwaInstallPrompt(null);
+      setPwaInstalled(true);
+      Ze("MIND FORTRESS installée sur votre appareil !");
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
+
+  async function handlePwaInstall() {
+    if (pwaInstallPrompt) {
+      pwaInstallPrompt.prompt();
+      const res = await pwaInstallPrompt.userChoice.catch(() => null);
+      if (res && res.outcome === "accepted") {
+        setPwaInstallPrompt(null);
+        setPwaInstalled(true);
+      }
+      return;
+    }
+    if (isIosBrowser) {
+      Ze("Sur iOS : appuie sur Partager puis « Sur l'écran d'accueil ».");
+    }
+  }
 
   // Apply server state helper
   function applyServerState(st) {
@@ -9973,7 +10018,18 @@ function Oa() {
             }, o.k)
           )
         })
-      })
+      }),
+
+      !pwaInstalled &&
+        (pwaInstallPrompt || isIosBrowser) &&
+        f("button", {
+          type: "button",
+          onClick: handlePwaInstall,
+          "aria-label": "Installer l'application",
+          className:
+            "fixed right-4 bottom-20 md:bottom-5 z-50 px-4 py-2.5 rounded-full bg-[#FF9500] hover:bg-[#FFA726] text-black font-extrabold text-sm shadow-[0_8px_24px_rgba(255,149,0,0.4)] flex items-center gap-2 transition-transform active:scale-95",
+          children: "📲 Installer l'app"
+        })
     ]
   });
 }
