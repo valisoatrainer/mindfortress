@@ -7,6 +7,7 @@
     "start": "node server.js",
     "db:init": "node db/init.js",
     "db:push-turso": "node db/push_to_turso.js",
+    "db:import-reference-openings": "node db/import_reference_openings.js",
     "test:step1": "node tests/step1_db_turso.test.js",
     "test:step2": "node tests/step2_valisoachess.test.js",
     "test:step3": "node tests/step3_fsrs.test.js",
